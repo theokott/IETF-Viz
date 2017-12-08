@@ -1,24 +1,37 @@
 # TODO:
 #      Very slow
-#           - Twisted (framework)
+#           - Twisted (framework)?
+#           - Futures!
+#           - BatchRequest
 #           - Cache stuff
 #      Better structure for docs, colors and labels
 #           - Make interesting and useful
 #      Is the graph accurate?
 #      Is it a tree?
-#      Clean up code (PEP8)
+#      Multiple edges between same pair (different relationships)
 
 import requests as rq
 import networkx as nx
 import matplotlib.pyplot as plt
 import documents as doc
+from requests_futures.sessions import FuturesSession
+
 
 base = 'https://datatracker.ietf.org'
 doc_cache = {}
 cached_calls = 0
+session = FuturesSession(max_workers=10)
 
+
+def future_get_doc_url(session, resp):
+    print("FUTURE: ", resp)
+    body = resp.json().get('objects')[0]
+    print(body.get('document'))
 
 def get_doc_url(rfc_num):
+
+    session.get(base + '/api/v1/doc/docalias/?name=' + rfc_num, background_callback=future_get_doc_url)
+
     resp = rq.get(base + '/api/v1/doc/docalias/?name=' + rfc_num)
     body = resp.json().get('objects')[0]
 
@@ -49,6 +62,7 @@ def get_doc(rfc_num):
 
 def find_related_docs(G, root, level):
     global cached_calls
+
     if level == 0:
         return
 
@@ -125,9 +139,5 @@ def main():
 
 main()
 
-for x in doc_cache:
-    print(x)
-
 total_calls = cached_calls + len(doc_cache.keys())
-
 print("total calls: ", total_calls, " calls saved: ", cached_calls, " ", (cached_calls/total_calls)*100, "%")
