@@ -1,44 +1,34 @@
 # TODO:
 #      Very slow
-#           - Twisted (framework)?
-#           - Futures!
-#           - BatchRequest
-#           - Cache stuff
+#           - Cache stuff in memory/disk
+#           - Calls still used to get the relationships between docs. Need to cache these.
 #      Better structure for docs, colors and labels
 #           - Make interesting and useful
 #      Is the graph accurate?
 #      Is it a tree?
-#      Multiple edges between same pair (different relationships)
-#           - Use reference object instead of just giving it the vertices?
-#      Better name for future_get_doc_url()
 #      Smarten up code
 #           - references used too much in future_get_related_docs()
 #           - is there a way to recursively call asynchronously?
-
+#           - Missing multiple references between the same pair (RFC1725 is both refold and obs)
+#           - Lambda func for passing args to callback?
 import requests as rq
 import networkx as nx
 import matplotlib.pyplot as plt
 import documents as doc
 from requests_futures.sessions import FuturesSession
-
+import _pickle as pickle
 
 base = 'https://datatracker.ietf.org'
-# Used to store what docs have already been created
 doc_cache = {}
-target_cache = {}
-# Used to pass data between future_get_related_docs() and future_get_doc_url()
-reference_cache = {}
 cached_calls = 0
+uncached_calls = 0
 session = FuturesSession(max_workers=50)
 
 
-def future_get_doc_url(sess, resp):
+def get_target_doc(sess, resp):
 
     # N.B. the data stored in the field 'name' in the JSON is actually the RFC Number and thus a unique ID.
     # The name of the draft that became the RFC is contained within the URL. This can be identical to the RFC Number
-
-    # print('FUTURE: ', resp)
-    # print('FUTURE RESPONSE: ', resp.json())
 
     body = resp.json().get('objects')[0]
     doc_id = body.get('name').upper()
@@ -46,21 +36,14 @@ def future_get_doc_url(sess, resp):
     split_url = doc_url.split('/')
     doc_name = split_url[-2]
 
-    # print('FUTURE ID: ', doc_id)
-    # print('FUTURE NAME: ', doc_name)
-    # print('FUTURE URL: ', doc_url)
-
     new_doc = doc.RFC(doc_id)
     new_doc.set_draft_url(doc_url)
     new_doc.set_draft_name(doc_name)
 
     doc_cache[new_doc.id] = new_doc
-    reference_cache[new_doc.id].set_target(new_doc)
-
 
 def get_doc_url(rfc_num):
-
-    session.get(base + '/api/v1/doc/docalias/?name=' + rfc_num, background_callback=future_get_doc_url)
+    session.get(base + '/api/v1/doc/docalias/?name=' + rfc_num, background_callback=get_target_doc)
 
     resp = rq.get(base + '/api/v1/doc/docalias/?name=' + rfc_num)
     body = resp.json().get('objects')[0]
@@ -71,7 +54,6 @@ def get_doc_url(rfc_num):
 def get_name(doc_url):
     resp = rq.get(base + doc_url)
     body = resp.json()
-    # print('GET NAME: ', body.get('name'))
 
     return body.get('name')
 
@@ -91,107 +73,61 @@ def get_doc(rfc_num):
     return new_doc
 
 
-def future_find_related_docs(G, root, level):
-    global cached_calls
-    futures = []
-
-    if level == 0:
-        return
-
-    references = []
-    relationships = get_relationships(root.draft_name)
-
-    # print(relationships)
-
-    # Make a bunch of async requests
-
-    for relationship in relationships:
-        new_reference = doc.Reference()
-        new_reference.set_source(root)
-
-        type_split = relationship.get('relationship').split('/')
-        new_reference.set_type(type_split[-2])
-
-        target_split = relationship.get('target').split('/')
-        target_doc_id = target_split[-2].upper()
-
-        if target_doc_id in doc_cache:
-            print(target_doc_id, " is cached")
-            target_doc = doc_cache[target_doc_id]
-            new_reference.set_target(target_doc)
-            cached_calls = cached_calls + 1
-        else:
-            print(target_doc_id, " is not cached")
-            # target_doc = get_doc(target_doc_id)
-
-            target_cache[target_doc_id] = doc.RFC(target_doc_id)
-            reference_cache[target_doc_id] = new_reference
-            futures.append(session.get(base + '/api/v1/doc/docalias/?name=' + target_doc_id,
-                                       background_callback=future_get_doc_url))
-
-    # Now wait for all of them to complete, which should roughly be at the same time
-    for future in futures:
-        result = future.result()
-        # print("RESULT: ", result.json())
-        body = result.json().get('objects')[0]
-        finished_target_id = body.get('name').upper()
-        # print('Finished reference: ', reference_cache[finished_target_id].type)
-        references.append(reference_cache[finished_target_id])
-
-    for reference in references:
-        if reference.type == 'refold':
-                G.add_edge(reference.source.id, reference.target.id, relType=reference.type, color='g')
-        else:
-            G.add_edge(reference.source.id, "blah " + reference.target.id, relType=reference.type, color='b')
-
-        find_related_docs(G, reference.target, level - 1)
+def add_reference(G, reference):
+    if reference.type == 'refold':
+        G.add_edge(reference.source.id, reference.target.id, relType=reference.type, color='g', style='dashdot')
+    else:
+        G.add_edge(reference.source.id, reference.target.id, relType=reference.type, color='b', style='dashdot')
 
 
 def find_related_docs(G, root, level):
     global cached_calls
+    global uncached_calls
+    futures = []
+    uncompleted_references = []
+    references = []
 
     if level == 0:
         return
 
-    references = []
     relationships = get_relationships(root.draft_name)
-
-    print(relationships)
-
-    ## Is there some way to get the info for the target docs with batches of requests?
 
     for relationship in relationships:
         new_reference = doc.Reference()
         new_reference.set_source(root)
 
+        type_split = relationship.get('relationship').split('/')
+        new_reference.set_type(type_split[-2])
+
         target_split = relationship.get('target').split('/')
         target_doc_id = target_split[-2].upper()
 
         if target_doc_id in doc_cache:
-            print(target_doc_id, " is cached")
             target_doc = doc_cache[target_doc_id]
+            new_reference.set_target(target_doc)
+            references.append(new_reference)
+
             cached_calls = cached_calls + 1
         else:
-            print(target_doc_id, " is not cached")
-            target_doc = get_doc(target_split[-2].upper())
-            doc_cache[target_doc.id] = target_doc
+            uncompleted_references.append((new_reference, target_doc_id))
 
-        new_reference.set_target(target_doc)
+            # If the document hasn't been cached, make an async request to make and cache it
+            futures.append(session.get(base + '/api/v1/doc/docalias/?name=' + target_doc_id,
+                                       background_callback=get_target_doc))
 
-        type_split = relationship.get('relationship').split('/')
-        new_reference.set_type(type_split[-2])
+            uncached_calls = uncached_calls + 1
 
-        references.append(new_reference)
+    # Now wait for all of async requests to complete, which should roughly be at the same time
+    for future in futures:
+        future.result()
 
-    reference_cache.clear()
+    for reference in uncompleted_references:
+        target_doc_id = reference[1]
+        reference[0].set_target(doc_cache[target_doc_id])
+        references.append(reference[0])
 
     for reference in references:
-
-        if reference.type == 'refold':
-                G.add_edge(reference.source.id, reference.target.id, relType=reference.type, color='g')
-        else:
-            G.add_edge(reference.source.id, reference.target.id, relType=reference.type, color='b')
-
+        add_reference(G, reference)
         find_related_docs(G, reference.target, level - 1)
 
 
@@ -201,7 +137,9 @@ def draw_graph(G):
     for node in G.nodes:
         labels[node] = node
 
-    pos = nx.spring_layout(G, k=0.2, iterations=20)
+    # pos = nx.spring_layout(G, k=0.2, iterations=20)
+    pos = nx.shell_layout(G)
+    # pos = nx.circular_layout(G)
     nx.draw_networkx_edges(G, pos, G.edges(), width=2, alpha=0.5, edge_color=nx.get_edge_attributes(G,'color').values())
     nx.draw_networkx_labels(G, pos, labels, node_size=50)
     plt.savefig('graph.png')
@@ -210,7 +148,13 @@ def draw_graph(G):
 
 
 def main():
-    G = nx.Graph()
+    global doc_cache
+
+    doc_cache_file = open('docs.pickle', 'rb')
+    doc_cache = pickle.load(doc_cache_file)
+    doc_cache_file.close()
+
+    G = nx.MultiGraph()
 
     rfc_num = 'RFC' + input('Enter the requested RFC number: ')
     deg_of_separation = input('Enter the degree of separation: ')
@@ -223,15 +167,18 @@ def main():
     print('\n' + ('=' * len(root_doc.draft_name)))
     print(root_doc.draft_name)
     print(('=' * len(root_doc.draft_name)) + '\n')
-    print('Building graph...')
 
-    future_find_related_docs(G, root_doc, int(deg_of_separation))
+    print('Building graph...')
+    find_related_docs(G, root_doc, int(deg_of_separation))
 
     print('Drawing graph...')
-
     draw_graph(G)
+
+    doc_cache_file = open('docs.pickle', 'wb')
+    pickle.dump(doc_cache, doc_cache_file, protocol=-1)
+    doc_cache_file.close()
 
 main()
 
-total_calls = cached_calls + len(doc_cache.keys())
+total_calls = cached_calls + uncached_calls
 print("total calls: ", total_calls, " calls saved: ", cached_calls, " ", (cached_calls/total_calls)*100, "%")
