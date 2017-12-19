@@ -4,12 +4,13 @@
 #           - Calls still used to get the relationships between docs. Need to cache these.
 #      Better structure for docs, colors and labels
 #           - Make interesting and useful
+#           - Multiple references between same pair of docs overlap
+#           - Still need to add that info to the actual classes...
 #      Is the graph accurate?
 #      Is it a tree?
 #      Smarten up code
 #           - references used too much in future_get_related_docs()
 #           - is there a way to recursively call asynchronously?
-#           - Missing multiple references between the same pair (RFC1725 is both refold and obs)
 #           - Lambda func for passing args to callback?
 import requests as rq
 import networkx as nx
@@ -19,7 +20,12 @@ from requests_futures.sessions import FuturesSession
 import _pickle as pickle
 
 base = 'https://datatracker.ietf.org'
+
+# A dictionary of RFCs indexed on the id of the RFC (such as doc_cache['RFC1939'])
 doc_cache = {}
+# A dictionary of References indexed on the id of the source RFC
+# (such as reference_cache[ref.source.id] or reference_cache['RFC1939'])
+reference_cache = {}
 cached_calls = 0
 uncached_calls = 0
 session = FuturesSession(max_workers=50)
@@ -41,6 +47,7 @@ def get_target_doc(sess, resp):
     new_doc.set_draft_name(doc_name)
 
     doc_cache[new_doc.id] = new_doc
+
 
 def get_doc_url(rfc_num):
     session.get(base + '/api/v1/doc/docalias/?name=' + rfc_num, background_callback=get_target_doc)
@@ -66,29 +73,31 @@ def get_relationships(doc_name):
 
 
 def get_doc(rfc_num):
-    new_doc = doc.RFC(rfc_num)
-    new_doc.set_draft_url(get_doc_url(new_doc.id))
-    new_doc.set_draft_name(get_name(new_doc.draft_url))
 
-    return new_doc
+    if rfc_num in doc_cache.keys():
+        return doc_cache[rfc_num]
+
+    else:
+        new_doc = doc.RFC(rfc_num)
+        new_doc.set_draft_url(get_doc_url(new_doc.id))
+        new_doc.set_draft_name(get_name(new_doc.draft_url))
+
+        return new_doc
 
 
-def add_reference(G, reference):
+def add_reference_to_graph(G, reference):
     if reference.type == 'refold':
         G.add_edge(reference.source.id, reference.target.id, relType=reference.type, color='g', style='dashdot')
     else:
         G.add_edge(reference.source.id, reference.target.id, relType=reference.type, color='b', style='dashdot')
 
 
-def find_related_docs(G, root, level):
+def get_related_docs(root):
     global cached_calls
     global uncached_calls
     futures = []
-    uncompleted_references = []
+    incomplete_references = []
     references = []
-
-    if level == 0:
-        return
 
     relationships = get_relationships(root.draft_name)
 
@@ -109,7 +118,7 @@ def find_related_docs(G, root, level):
 
             cached_calls = cached_calls + 1
         else:
-            uncompleted_references.append((new_reference, target_doc_id))
+            incomplete_references.append((new_reference, target_doc_id))
 
             # If the document hasn't been cached, make an async request to make and cache it
             futures.append(session.get(base + '/api/v1/doc/docalias/?name=' + target_doc_id,
@@ -121,13 +130,35 @@ def find_related_docs(G, root, level):
     for future in futures:
         future.result()
 
-    for reference in uncompleted_references:
+    for reference in incomplete_references:
         target_doc_id = reference[1]
         reference[0].set_target(doc_cache[target_doc_id])
         references.append(reference[0])
 
+    return references
+
+
+def find_related_docs(G, root, level):
+
+    if level == 0:
+        return
+
+    if root.id not in reference_cache.keys():
+        print(root.id, "is not cached!")
+        references = get_related_docs(root)
+
+    else:
+        print(root.id, "is cached!")
+        references = reference_cache[root.id]
+
     for reference in references:
-        add_reference(G, reference)
+        if reference.source.id not in reference_cache.keys():
+            reference_cache[reference.source.id] = [reference]
+
+        elif reference not in reference_cache[reference.source.id]:
+            reference_cache[reference.source.id].append(reference)
+
+        add_reference_to_graph(G, reference)
         find_related_docs(G, reference.target, level - 1)
 
 
@@ -147,14 +178,36 @@ def draw_graph(G):
     plt.show()
 
 
-def main():
+def unpickle_caches():
     global doc_cache
+    global reference_cache
 
     doc_cache_file = open('docs.pickle', 'rb')
     doc_cache = pickle.load(doc_cache_file)
     doc_cache_file.close()
 
+    reference_cache_file = open('refs.pickle', 'rb')
+    reference_cache = pickle.load(reference_cache_file)
+    reference_cache_file.close()
+
+
+def pickle_caches():
+    global doc_cache
+    global reference_cache
+
+    doc_cache_file = open('docs.pickle', 'wb')
+    pickle.dump(doc_cache, doc_cache_file, protocol=-1)
+    doc_cache_file.close()
+
+    reference_cache_file = open('refs.pickle', 'wb')
+    pickle.dump(reference_cache, reference_cache_file, protocol=-1)
+    reference_cache_file.close()
+
+
+def main():
     G = nx.MultiGraph()
+
+    unpickle_caches()
 
     rfc_num = 'RFC' + input('Enter the requested RFC number: ')
     deg_of_separation = input('Enter the degree of separation: ')
@@ -171,14 +224,18 @@ def main():
     print('Building graph...')
     find_related_docs(G, root_doc, int(deg_of_separation))
 
+    pickle_caches()
+
     print('Drawing graph...')
     draw_graph(G)
-
-    doc_cache_file = open('docs.pickle', 'wb')
-    pickle.dump(doc_cache, doc_cache_file, protocol=-1)
-    doc_cache_file.close()
 
 main()
 
 total_calls = cached_calls + uncached_calls
-print("total calls: ", total_calls, " calls saved: ", cached_calls, " ", (cached_calls/total_calls)*100, "%")
+print("total calls: ", total_calls, " calls saved: ", cached_calls, " ", (cached_calls/max(total_calls, 1))*100, "%")
+
+for key, ref_list in reference_cache.items():
+    print("\nkey:", key)
+    print("ref_list:")
+    for ref in ref_list:
+        print("   ", ref.source.id, "->", ref.target.id)

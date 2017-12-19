@@ -8,6 +8,7 @@ class Reference:
         self.source = ""
         self.target = ""
         self.type = -1
+        self.group = ""
 
     def set_source(self, source):
         self.source = source
@@ -17,6 +18,9 @@ class Reference:
 
     def set_type(self, ref_type):
         self.type = ref_type
+
+    def set_group(self, group):
+        self.group = group
 
 
 class RFC:
