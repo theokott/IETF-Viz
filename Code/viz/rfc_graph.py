@@ -1,7 +1,6 @@
 # TODO:
 #      Very slow
 #           - Cache stuff in memory/disk
-#           - Calls still used to get the relationships between docs. Need to cache these.
 #      Better structure for docs, colors and labels
 #           - Make interesting and useful
 #           - Multiple references between same pair of docs overlap
@@ -12,6 +11,7 @@
 #           - references used too much in future_get_related_docs()
 #           - is there a way to recursively call asynchronously?
 #           - Lambda func for passing args to callback?
+#           - If a doc has no references, this information is not added to the cache!
 import requests as rq
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -53,6 +53,7 @@ def get_doc_url(rfc_num):
     session.get(base + '/api/v1/doc/docalias/?name=' + rfc_num, background_callback=get_target_doc)
 
     resp = rq.get(base + '/api/v1/doc/docalias/?name=' + rfc_num)
+
     body = resp.json().get('objects')[0]
 
     return body.get('document')
@@ -99,6 +100,8 @@ def get_related_docs(root):
     incomplete_references = []
     references = []
 
+    i = 0;
+
     relationships = get_relationships(root.draft_name)
 
     for relationship in relationships:
@@ -112,6 +115,7 @@ def get_related_docs(root):
         target_doc_id = target_split[-2].upper()
 
         if target_doc_id in doc_cache:
+            print(target_doc_id, "is in the cache")
             target_doc = doc_cache[target_doc_id]
             new_reference.set_target(target_doc)
             references.append(new_reference)
@@ -119,6 +123,7 @@ def get_related_docs(root):
             cached_calls = cached_calls + 1
         else:
             incomplete_references.append((new_reference, target_doc_id))
+            print(target_doc_id, "is not in the cache")
 
             # If the document hasn't been cached, make an async request to make and cache it
             futures.append(session.get(base + '/api/v1/doc/docalias/?name=' + target_doc_id,
@@ -144,22 +149,26 @@ def find_related_docs(G, root, level):
         return
 
     if root.id not in reference_cache.keys():
-        print(root.id, "is not cached!")
+        print(root.id, "refs are not cached!")
         references = get_related_docs(root)
 
     else:
-        print(root.id, "is cached!")
+        print(root.id, "refs are cached!")
         references = reference_cache[root.id]
 
-    for reference in references:
-        if reference.source.id not in reference_cache.keys():
-            reference_cache[reference.source.id] = [reference]
+    if len(references) == 0:
+        reference_cache[root.id] = []
 
-        elif reference not in reference_cache[reference.source.id]:
-            reference_cache[reference.source.id].append(reference)
+    else:
+        for reference in references:
+            if root.id not in reference_cache.keys():
+                reference_cache[root.id] = [reference]
 
-        add_reference_to_graph(G, reference)
-        find_related_docs(G, reference.target, level - 1)
+            elif reference not in reference_cache[root.id]:
+                reference_cache[root.id].append(reference)
+
+            add_reference_to_graph(G, reference)
+            find_related_docs(G, reference.target, level - 1)
 
 
 def draw_graph(G):
@@ -182,13 +191,25 @@ def unpickle_caches():
     global doc_cache
     global reference_cache
 
-    doc_cache_file = open('docs.pickle', 'rb')
-    doc_cache = pickle.load(doc_cache_file)
-    doc_cache_file.close()
+    try:
 
-    reference_cache_file = open('refs.pickle', 'rb')
-    reference_cache = pickle.load(reference_cache_file)
-    reference_cache_file.close()
+        doc_cache_file = open('docs.pickle', 'rb')
+        doc_cache = pickle.load(doc_cache_file)
+        doc_cache_file.close()
+        print("Loaded document cache")
+
+    except FileNotFoundError:
+        print("No document cache found!")
+
+    try:
+
+        reference_cache_file = open('refs.pickle', 'rb')
+        reference_cache = pickle.load(reference_cache_file)
+        reference_cache_file.close()
+        print("Loaded reference cache")
+
+    except FileNotFoundError:
+        print("No reference cache found!")
 
 
 def pickle_caches():
@@ -198,10 +219,12 @@ def pickle_caches():
     doc_cache_file = open('docs.pickle', 'wb')
     pickle.dump(doc_cache, doc_cache_file, protocol=-1)
     doc_cache_file.close()
+    print("Document cache written to disk!")
 
     reference_cache_file = open('refs.pickle', 'wb')
     pickle.dump(reference_cache, reference_cache_file, protocol=-1)
     reference_cache_file.close()
+    print("Reference cache written to disk!")
 
 
 def main():
@@ -233,9 +256,3 @@ main()
 
 total_calls = cached_calls + uncached_calls
 print("total calls: ", total_calls, " calls saved: ", cached_calls, " ", (cached_calls/max(total_calls, 1))*100, "%")
-
-for key, ref_list in reference_cache.items():
-    print("\nkey:", key)
-    print("ref_list:")
-    for ref in ref_list:
-        print("   ", ref.source.id, "->", ref.target.id)
