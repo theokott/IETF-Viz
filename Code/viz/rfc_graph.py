@@ -1,6 +1,4 @@
 # TODO:
-#      Very slow
-#           - Cache stuff in memory/disk
 #      Better structure for docs, colors and labels
 #           - Make interesting and useful
 #           - Multiple references between same pair of docs overlap
@@ -11,13 +9,18 @@
 #           - references used too much in future_get_related_docs()
 #           - is there a way to recursively call asynchronously?
 #           - Lambda func for passing args to callback?
-#           - If a doc has no references, this information is not added to the cache!
+#       Need to edit generated Dot/Graphviz files to improve layout
+#           - Ranksep
+#           - Clusters? 
+
 import requests as rq
 import networkx as nx
 import matplotlib.pyplot as plt
 import documents as doc
 from requests_futures.sessions import FuturesSession
 import _pickle as pickle
+# import graphviz
+# import pydot as pd
 
 base = 'https://datatracker.ietf.org'
 
@@ -31,6 +34,7 @@ uncached_calls = 0
 session = FuturesSession(max_workers=50)
 
 
+# TODO: REWRITE THIS TO MAKE A PROPER CALL TO /doc/document/[docname]/
 def get_target_doc(sess, resp):
 
     # N.B. the data stored in the field 'name' in the JSON is actually the RFC Number and thus a unique ID.
@@ -88,9 +92,9 @@ def get_doc(rfc_num):
 
 def add_reference_to_graph(G, reference):
     if reference.type == 'refold':
-        G.add_edge(reference.source.id, reference.target.id, relType=reference.type, color='g', style='dashdot')
+        G.add_edge(reference.source.id, reference.target.id, relType=reference.type, color='green', style='solid')
     else:
-        G.add_edge(reference.source.id, reference.target.id, relType=reference.type, color='b', style='dashdot')
+        G.add_edge(reference.source.id, reference.target.id, relType=reference.type, color='blue', style='solid')
 
 
 def get_related_docs(root):
@@ -228,7 +232,7 @@ def pickle_caches():
 
 
 def main():
-    G = nx.MultiGraph()
+    G = nx.MultiDiGraph()
 
     unpickle_caches()
 
@@ -251,6 +255,7 @@ def main():
 
     print('Drawing graph...')
     draw_graph(G)
+    nx.drawing.nx_pydot.write_dot(G, 'graph.dot')
 
 main()
 
