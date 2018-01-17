@@ -19,6 +19,9 @@ import matplotlib.pyplot as plt
 import documents as doc
 from requests_futures.sessions import FuturesSession
 import _pickle as pickle
+import svgwrite
+from math import pi, sin, cos
+from svgwrite import cm, mm
 # import graphviz
 # import pydot as pd
 
@@ -26,8 +29,9 @@ base = 'https://datatracker.ietf.org'
 
 # A dictionary of RFCs indexed on the id of the RFC (such as doc_cache['RFC1939'])
 doc_cache = {}
+
 # A dictionary of References indexed on the id of the source RFC
-# (such as reference_cache[ref.source.id] or reference_cache['RFC1939'])
+#   (such as reference_cache[ref.source.id] or reference_cache['RFC1939'])
 reference_cache = {}
 cached_calls = 0
 uncached_calls = 0
@@ -103,6 +107,7 @@ def get_related_docs(root):
     futures = []
     incomplete_references = []
     references = []
+
 
     i = 0;
 
@@ -230,6 +235,46 @@ def pickle_caches():
     reference_cache_file.close()
     print("Reference cache written to disk!")
 
+def get_obs_graph(rfc_num):
+    og = nx.MultiDiGraph()
+    obs_refs = []
+
+    refs = reference_cache[rfc_num]
+    num_of_refs = len(refs)
+    angle_incr = pi*(2/num_of_refs)
+    radius = 30
+    buffer = radius * 1.1
+    x0 = 300
+    y0 = 300
+    count = 0
+
+    dwg = svgwrite.Drawing(filename="obs-graph.svg", debug=True)
+    for ref in refs:
+        new_x = x0 * sin(angle_incr * count) + (x0 + buffer * 3)
+        new_y = y0 * cos(angle_incr * count) + (y0 + buffer)
+        id = str(ref.target.id)
+
+        print("new x: ", new_x)
+        print("new y: ", new_y)
+
+        dwg.add(dwg.line(start=(new_x, new_y), end=(x0 + (buffer * 3), y0 + buffer), stroke='black', stroke_width=2))
+        dwg.add(dwg.ellipse(center=(new_x, new_y), r=(radius*3, radius),
+                            fill='#7777ff', stroke='black', stroke_width=1))
+        dwg.add(dwg.text(text=id, insert=(new_x - (radius * 3/4), new_y)))
+
+        count = count + 1
+
+    dwg.add(dwg.ellipse(center=(x0 + (buffer * 3), y0 + buffer), r=(radius*3, radius),
+                       fill='blue', stroke='black', stroke_width=1))
+    dwg.save()
+
+
+def draw_svg(name):
+    dwg = svgwrite.Drawing('test.svg', profile='tiny')
+    dwg.add(dwg.line((0, 0), (10, 0), stroke=svgwrite.rgb(10, 10, 16, '%')))
+    dwg.add(dwg.text('Test', insert=(0, 0.2)))
+    dwg.save()
+
 
 def main():
     G = nx.MultiDiGraph()
@@ -237,6 +282,7 @@ def main():
     unpickle_caches()
 
     rfc_num = 'RFC' + input('Enter the requested RFC number: ')
+
     deg_of_separation = input('Enter the degree of separation: ')
 
     root_doc = get_doc(rfc_num)
@@ -256,6 +302,8 @@ def main():
     print('Drawing graph...')
     draw_graph(G)
     nx.drawing.nx_pydot.write_dot(G, 'graph.dot')
+
+    get_obs_graph(rfc_num)
 
 main()
 
