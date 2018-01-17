@@ -235,7 +235,7 @@ def pickle_caches():
     reference_cache_file.close()
     print("Reference cache written to disk!")
 
-def get_obs_graph(rfc_num):
+def draw_circle_graph(rfc_num):
     og = nx.MultiDiGraph()
     obs_refs = []
 
@@ -269,6 +269,61 @@ def get_obs_graph(rfc_num):
     dwg.save()
 
 
+# Encode status (is it a draft?)
+# Scale position based on date
+# Split into smaller functions
+def draw_timeline(timeline):
+
+    # Define constants for size of ellipses and edges
+    rx = 90
+    ry = 50
+    sep = 70
+    x_buffer = rx + 20
+    y_buffer = ry + 20
+    size = len(timeline)
+
+    # size of n ellipses + size of n-1 lines + buffer
+    x0 = (size * 2 * rx) + ((size - 1) * sep) + x_buffer
+    y0 = ry + y_buffer
+
+    dwg = svgwrite.Drawing(filename="obs-graph.svg", debug=True)
+
+    dwg.add(dwg.line(start=(x_buffer + 2*rx, y0), end=(x0, y0), stroke='black', stroke_width=2))
+
+    count = 0
+    for doc in timeline:
+        print(doc)
+        new_x = x0 - ((sep + (2 * rx)) * count)
+
+        if doc is None:
+            dwg.add(dwg.line(start=(new_x, y0 + 10), end=(new_x, y0 - 10), stroke='black', stroke_width=2))
+        else:
+            dwg.add(dwg.ellipse(center=(new_x, y0), r=(rx, ry),
+                                fill='#bbbbff', stroke='black', stroke_width=1))
+            dwg.add(dwg.text(text=doc.id, insert=(new_x - rx/2, y0)))
+        count = count + 1
+
+    dwg.save()
+
+
+def get_obs_docs(rfc_num):
+
+    timeline = [doc_cache[rfc_num]]
+
+    is_end = True
+
+    for ref in reference_cache[rfc_num]:
+        if ref.type == "obs":
+            is_end = False
+            timeline = timeline + get_obs_docs(ref.target.id)
+
+    if is_end:
+        return timeline + [None]
+    else:
+        return timeline
+
+
+
 def draw_svg(name):
     dwg = svgwrite.Drawing('test.svg', profile='tiny')
     dwg.add(dwg.line((0, 0), (10, 0), stroke=svgwrite.rgb(10, 10, 16, '%')))
@@ -299,11 +354,14 @@ def main():
 
     pickle_caches()
 
-    print('Drawing graph...')
-    draw_graph(G)
-    nx.drawing.nx_pydot.write_dot(G, 'graph.dot')
+    # print('Drawing graph...')
+    # draw_graph(G)
+    # nx.drawing.nx_pydot.write_dot(G, 'graph.dot')
 
-    get_obs_graph(rfc_num)
+    timeline = get_obs_docs(rfc_num)
+
+    draw_timeline(timeline)
+    # draw_circle_graph(rfc_num)
 
 main()
 
