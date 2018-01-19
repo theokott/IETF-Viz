@@ -28,9 +28,21 @@ class RFC:
         self.id = id
         self.draft_name = ""
         self.draft_url = ""
+        self.group = ""
+        self.area = ""
+        self.title = ""
 
     def set_draft_name(self, name):
         self.draft_name = name
 
     def set_draft_url(self, url):
         self.draft_url = url
+
+    def set_group(self, working_group):
+        self.group = working_group
+
+    def set_area(self, group_area):
+        self.area = group_area
+
+    def set_title(self, title):
+        self.title = title

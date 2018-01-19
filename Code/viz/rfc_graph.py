@@ -20,6 +20,7 @@ import documents as doc
 from requests_futures.sessions import FuturesSession
 import _pickle as pickle
 import svgwrite
+from os.path import isfile
 from math import pi, sin, cos
 from svgwrite import cm, mm
 # import graphviz
@@ -38,6 +39,14 @@ uncached_calls = 0
 session = FuturesSession(max_workers=50)
 
 
+# Actually build the target doc here!
+# Could either have hashtable of useful WGs or add them dynamically (would require ANOTHER async call)
+def build_target_doc(sess, resp):
+    print("build_target_doc resp: ", resp.json()["name"])
+
+    return True
+
+
 # TODO: REWRITE THIS TO MAKE A PROPER CALL TO /doc/document/[docname]/
 def get_target_doc(sess, resp):
 
@@ -50,13 +59,16 @@ def get_target_doc(sess, resp):
     split_url = doc_url.split('/')
     doc_name = split_url[-2]
 
+    print("CALLING /api/v1/doc/document/" +  doc_name)
+    session.get(base + "/api/v1/doc/document/" + doc_name, background_callback=build_target_doc).result()
+
     new_doc = doc.RFC(doc_id)
     new_doc.set_draft_url(doc_url)
     new_doc.set_draft_name(doc_name)
 
     doc_cache[new_doc.id] = new_doc
 
-
+# REWRITE THIS!
 def get_doc_url(rfc_num):
     session.get(base + '/api/v1/doc/docalias/?name=' + rfc_num, background_callback=get_target_doc)
 
@@ -87,11 +99,16 @@ def get_doc(rfc_num):
         return doc_cache[rfc_num]
 
     else:
-        new_doc = doc.RFC(rfc_num)
-        new_doc.set_draft_url(get_doc_url(new_doc.id))
-        new_doc.set_draft_name(get_name(new_doc.draft_url))
+        # new_doc = doc.RFC(rfc_num)
+        # new_doc.set_draft_url(get_doc_url(new_doc.id))
+        # new_doc.set_draft_name(get_name(new_doc.draft_url))
+        #
+        # return new_doc
 
-        return new_doc
+        future = session.get(base + '/api/v1/doc/docalias/?name=' + rfc_num, background_callback=get_target_doc)
+        future.result()
+
+        return doc_cache[rfc_num]
 
 
 def add_reference_to_graph(G, reference):
@@ -107,9 +124,6 @@ def get_related_docs(root):
     futures = []
     incomplete_references = []
     references = []
-
-
-    i = 0;
 
     relationships = get_relationships(root.draft_name)
 
@@ -312,6 +326,8 @@ def get_obs_docs(rfc_num):
 
     is_end = True
 
+
+    #   WHAT IF WE HAVEN'T ADDED THE REFENCES?
     for ref in reference_cache[rfc_num]:
         if ref.type == "obs":
             is_end = False
@@ -352,15 +368,15 @@ def main():
     print('Building graph...')
     find_related_docs(G, root_doc, int(deg_of_separation))
 
-    pickle_caches()
+    # pickle_caches()
 
-    # print('Drawing graph...')
-    # draw_graph(G)
-    # nx.drawing.nx_pydot.write_dot(G, 'graph.dot')
+    print('Drawing graph...')
+    draw_graph(G)
+    nx.drawing.nx_pydot.write_dot(G, 'graph.dot')
 
-    timeline = get_obs_docs(rfc_num)
+    # timeline = get_obs_docs(rfc_num)
 
-    draw_timeline(timeline)
+    # draw_timeline(timeline)
     # draw_circle_graph(rfc_num)
 
 main()
