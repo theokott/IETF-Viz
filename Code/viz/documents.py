@@ -2,6 +2,18 @@
 #       Enumerations for type
 
 
+class Group:
+    def __init__(self, id):
+        self.id = id
+        self.name = ""
+        self.parent_url = ""
+
+    def set_name(self, name):
+        self.name = name
+
+    def set_parent_url(self, parent_url):
+        self.parent_url = parent_url
+
 class Reference:
     def __init__(self):
         self.id = -1
@@ -28,9 +40,13 @@ class RFC:
         self.id = id
         self.draft_name = ""
         self.draft_url = ""
-        self.group = ""
-        self.area = ""
+        self.group = -1
+        self.group_url = ""
+        self.url = ""
+        self.area = -1
+        self.area_url = ""
         self.title = ""
+        self.abstract = ""
 
     def set_draft_name(self, name):
         self.draft_name = name
@@ -46,3 +62,18 @@ class RFC:
 
     def set_title(self, title):
         self.title = title
+
+    def set_abstract(self, abs):
+        self.abstract = abs
+
+    def set_group(self, group):
+        self.group = group
+
+    def set_group_url(self, group_url):
+        self.group_url = group_url
+
+    def set_area(self, area):
+        self.area = area
+
+    def set_area_url(self, area_url):
+        self.area_url = area_url

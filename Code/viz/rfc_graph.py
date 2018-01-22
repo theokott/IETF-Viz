@@ -11,7 +11,8 @@
 #           - Lambda func for passing args to callback?
 #       Need to edit generated Dot/Graphviz files to improve layout
 #           - Ranksep
-#           - Clusters? 
+#           - Clusters?
+#       REFACTOR GET RELATED DOCS
 
 import requests as rq
 import networkx as nx
@@ -34,56 +35,68 @@ doc_cache = {}
 # A dictionary of References indexed on the id of the source RFC
 #   (such as reference_cache[ref.source.id] or reference_cache['RFC1939'])
 reference_cache = {}
-cached_calls = 0
-uncached_calls = 0
+
+# A dictionary of groups indexed on their id (such as group_cache[1027])
+group_cache = {}
+
 session = FuturesSession(max_workers=50)
 
 
-# Actually build the target doc here!
-# Could either have hashtable of useful WGs or add them dynamically (would require ANOTHER async call)
-def build_target_doc(sess, resp):
-    print("build_target_doc resp: ", resp.json()["name"])
+def get_group_info(sess, resp):
+    json = resp.json()
 
-    return True
+    group_id = json["id"]
 
+    new_group = doc.Group(group_id)
+    new_group.set_name(json["name"])
+    new_group.set_parent_url(json["parent"])
 
-# TODO: REWRITE THIS TO MAKE A PROPER CALL TO /doc/document/[docname]/
-def get_target_doc(sess, resp):
+    print("group_id: ", group_id)
 
-    # N.B. the data stored in the field 'name' in the JSON is actually the RFC Number and thus a unique ID.
-    # The name of the draft that became the RFC is contained within the URL. This can be identical to the RFC Number
+    group_cache[group_id] = new_group
 
-    body = resp.json().get('objects')[0]
-    doc_id = body.get('name').upper()
-    doc_url = body.get('document')
-    split_url = doc_url.split('/')
-    doc_name = split_url[-2]
-
-    print("CALLING /api/v1/doc/document/" +  doc_name)
-    session.get(base + "/api/v1/doc/document/" + doc_name, background_callback=build_target_doc).result()
-
-    new_doc = doc.RFC(doc_id)
-    new_doc.set_draft_url(doc_url)
-    new_doc.set_draft_name(doc_name)
-
-    doc_cache[new_doc.id] = new_doc
-
-# REWRITE THIS!
-def get_doc_url(rfc_num):
-    session.get(base + '/api/v1/doc/docalias/?name=' + rfc_num, background_callback=get_target_doc)
-
-    resp = rq.get(base + '/api/v1/doc/docalias/?name=' + rfc_num)
-
-    body = resp.json().get('objects')[0]
-
-    return body.get('document')
+    print(group_cache[group_id].name)
 
 
-def get_name(doc_url):
-    resp = rq.get(base + doc_url)
-    body = resp.json()
+def get_doc_info(sess, resp):
+    json = resp.json()
 
-    return body.get('name')
+    doc_id = "RFC" + json["rfc"]
+    updated_doc = doc_cache[doc_id]
+    updated_doc.set_draft_name(json["name"])
+    updated_doc.set_title(json["title"])
+    updated_doc.set_abstract(json["abstract"])
+    updated_doc.set_group_url(json["group"])
+
+    print("get_doc_info group url:", updated_doc.group_url, json["group"])
+    print("get_doc_info id:", updated_doc.id, json["rfc"])
+
+
+def resolve_doc_url(sess, resp):
+    json = resp.json()
+    doc_id = json['name'].upper()
+    doc_url = json['document']
+
+    # Sometimes a doc will be referred to in alternate ways such as BCP14 instead of RFC2119 so a link between the two
+    #   is made for convenience
+    if doc_id[0:3] != 'RFC':
+        print(doc_id[0:3])
+        request = rq.get(base + doc_url)
+        rfc_num = request.json()["rfc"]
+        alt_doc_id = doc_id
+        doc_id = "RFC" + rfc_num
+
+        new_doc = doc.RFC(doc_id)
+        new_doc.set_draft_url(doc_url)
+
+        doc_cache[new_doc.id] = new_doc
+        doc_cache[alt_doc_id] = doc_cache[doc_id]
+
+    else:
+        new_doc = doc.RFC(doc_id)
+        new_doc.set_draft_url(doc_url)
+
+        doc_cache[new_doc.id] = new_doc
 
 
 def get_relationships(doc_name):
@@ -93,35 +106,72 @@ def get_relationships(doc_name):
     return relationships
 
 
-def get_doc(rfc_num):
+def build_group(group_id):
+    # Create the group that the doc is part of
+    group_url = "/api/v1/group/group/" + str(group_id)
+    group_future = session.get(base + group_url, background_callback=get_group_info)
+    group_future.result()
 
+def get_group(group_id):
+    if group_id in group_cache.keys():
+        return group_cache[group_id]
+
+    else:
+        build_group(group_id)
+        return group_cache[group_id]
+
+
+def build_doc(rfc_num):
+    # Resolve RFC number into URL that can be used to find out more info about the RFC
+    url_future = session.get(base + '/api/v1/doc/docalias/' + rfc_num, background_callback=resolve_doc_url)
+    url_future.result()
+
+    # Get the info for the doc now that we have a URL to query
+    doc_url = doc_cache[rfc_num].draft_url
+    doc_future = session.get(base + doc_url, background_callback=get_doc_info)
+    doc_future.result()
+
+    # Create the group that the doc is part of
+    group_url = doc_cache[rfc_num].group_url
+    print(doc_cache[rfc_num])
+    print("rfc_num:", rfc_num)
+    print("group url:", doc_cache[rfc_num].group_url)
+    print("id:", doc_cache[rfc_num].id)
+    group_id = int(group_url.split("/")[-2])
+
+    # Add the group's info to the doc's group fields
+    doc_cache[rfc_num].set_group(get_group(group_id))
+    doc_cache[rfc_num].set_area_url(group_cache[group_id].parent_url)
+
+    # Add info for the doc's area/group's parent
+    parent_url = group_cache[group_id].parent_url
+    parent_id = int(parent_url.split("/")[-2])
+
+    doc_cache[rfc_num].set_area(get_group(parent_id))
+
+
+def get_doc(rfc_num):
     if rfc_num in doc_cache.keys():
         return doc_cache[rfc_num]
 
     else:
-        # new_doc = doc.RFC(rfc_num)
-        # new_doc.set_draft_url(get_doc_url(new_doc.id))
-        # new_doc.set_draft_name(get_name(new_doc.draft_url))
-        #
-        # return new_doc
-
-        future = session.get(base + '/api/v1/doc/docalias/?name=' + rfc_num, background_callback=get_target_doc)
-        future.result()
-
+        build_doc(rfc_num)
         return doc_cache[rfc_num]
 
 
 def add_reference_to_graph(G, reference):
     if reference.type == 'refold':
-        G.add_edge(reference.source.id, reference.target.id, relType=reference.type, color='green', style='solid')
+        G.add_edge(reference.source.id + " - " + reference.source.draft_name,
+                   reference.target.id + " - " + reference.target.draft_name,
+                   relType=reference.type, color='green', style='solid')
     else:
-        G.add_edge(reference.source.id, reference.target.id, relType=reference.type, color='blue', style='solid')
+        G.add_edge(reference.source.id + " - " + reference.source.draft_name,
+                   reference.target.id + " - " + reference.target.draft_name,
+                   relType=reference.type, color='blue', style='solid')
 
 
+# Wrap calls to build_doc in future for asynchronous
 def get_related_docs(root):
-    global cached_calls
-    global uncached_calls
-    futures = []
     incomplete_references = []
     references = []
 
@@ -138,25 +188,17 @@ def get_related_docs(root):
         target_doc_id = target_split[-2].upper()
 
         if target_doc_id in doc_cache:
-            print(target_doc_id, "is in the cache")
             target_doc = doc_cache[target_doc_id]
             new_reference.set_target(target_doc)
             references.append(new_reference)
-
-            cached_calls = cached_calls + 1
         else:
             incomplete_references.append((new_reference, target_doc_id))
-            print(target_doc_id, "is not in the cache")
 
             # If the document hasn't been cached, make an async request to make and cache it
-            futures.append(session.get(base + '/api/v1/doc/docalias/?name=' + target_doc_id,
-                                       background_callback=get_target_doc))
-
-            uncached_calls = uncached_calls + 1
+            print("target_doc_id:", target_doc_id)
+            build_doc(target_doc_id)
 
     # Now wait for all of async requests to complete, which should roughly be at the same time
-    for future in futures:
-        future.result()
 
     for reference in incomplete_references:
         target_doc_id = reference[1]
@@ -172,11 +214,9 @@ def find_related_docs(G, root, level):
         return
 
     if root.id not in reference_cache.keys():
-        print(root.id, "refs are not cached!")
         references = get_related_docs(root)
 
     else:
-        print(root.id, "refs are cached!")
         references = reference_cache[root.id]
 
     if len(references) == 0:
@@ -380,6 +420,3 @@ def main():
     # draw_circle_graph(rfc_num)
 
 main()
-
-total_calls = cached_calls + uncached_calls
-print("total calls: ", total_calls, " calls saved: ", cached_calls, " ", (cached_calls/max(total_calls, 1))*100, "%")
