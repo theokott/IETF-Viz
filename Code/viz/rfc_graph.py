@@ -21,7 +21,7 @@ import documents as doc
 from requests_futures.sessions import FuturesSession
 import _pickle as pickle
 import svgwrite
-from os.path import isfile
+import datetime
 from math import pi, sin, cos
 from svgwrite import cm, mm
 # import graphviz
@@ -51,11 +51,7 @@ def get_group_info(sess, resp):
     new_group.set_name(json["name"])
     new_group.set_parent_url(json["parent"])
 
-    print("group_id: ", group_id)
-
     group_cache[group_id] = new_group
-
-    print(group_cache[group_id].name)
 
 
 def get_doc_info(sess, resp):
@@ -68,9 +64,6 @@ def get_doc_info(sess, resp):
     updated_doc.set_abstract(json["abstract"])
     updated_doc.set_group_url(json["group"])
 
-    print("get_doc_info group url:", updated_doc.group_url, json["group"])
-    print("get_doc_info id:", updated_doc.id, json["rfc"])
-
 
 def resolve_doc_url(sess, resp):
     json = resp.json()
@@ -80,7 +73,6 @@ def resolve_doc_url(sess, resp):
     # Sometimes a doc will be referred to in alternate ways such as BCP14 instead of RFC2119 so a link between the two
     #   is made for convenience
     if doc_id[0:3] != 'RFC':
-        print(doc_id[0:3])
         request = rq.get(base + doc_url)
         rfc_num = request.json()["rfc"]
         alt_doc_id = doc_id
@@ -131,12 +123,29 @@ def build_doc(rfc_num):
     doc_future = session.get(base + doc_url, background_callback=get_doc_info)
     doc_future.result()
 
+
+    # Get the date that the document was published
+    events_json = rq.get(base + "/api/v1/doc/docevent/?doc=" + doc_cache[rfc_num].draft_name).json()
+    events = events_json["objects"]
+    for event in events:
+        if event["type"] == "published_rfc":
+            time_string = event["time"]
+            date = time_string.split("T")[0]
+            date_split = date.split("-")
+            time = time_string.split("T")[1]
+            time_split = time.split(":")
+
+            publish_date = datetime.datetime(year=int(date_split[0]),
+                                             month=int(date_split[1]),
+                                             day=int(date_split[2]),
+                                             hour=int(time_split[0]),
+                                             minute=int(time_split[1]),
+                                             second=int(time_split[2]))
+
+            doc_cache[rfc_num].set_publish_date(publish_date)
+
     # Create the group that the doc is part of
     group_url = doc_cache[rfc_num].group_url
-    print(doc_cache[rfc_num])
-    print("rfc_num:", rfc_num)
-    print("group url:", doc_cache[rfc_num].group_url)
-    print("id:", doc_cache[rfc_num].id)
     group_id = int(group_url.split("/")[-2])
 
     # Add the group's info to the doc's group fields
@@ -195,7 +204,6 @@ def get_related_docs(root):
             incomplete_references.append((new_reference, target_doc_id))
 
             # If the document hasn't been cached, make an async request to make and cache it
-            print("target_doc_id:", target_doc_id)
             build_doc(target_doc_id)
 
     # Now wait for all of async requests to complete, which should roughly be at the same time
@@ -365,7 +373,6 @@ def get_obs_docs(rfc_num):
     timeline = [doc_cache[rfc_num]]
 
     is_end = True
-
 
     #   WHAT IF WE HAVEN'T ADDED THE REFENCES?
     for ref in reference_cache[rfc_num]:

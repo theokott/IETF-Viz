@@ -1,6 +1,7 @@
 # TODO:
 #       Enumerations for type
 
+import datetime
 
 class Group:
     def __init__(self, id):
@@ -47,6 +48,7 @@ class RFC:
         self.area_url = ""
         self.title = ""
         self.abstract = ""
+        self.publish_date = ""
 
     def set_draft_name(self, name):
         self.draft_name = name
@@ -77,3 +79,6 @@ class RFC:
 
     def set_area_url(self, area_url):
         self.area_url = area_url
+
+    def set_publish_date(self, date):
+        self.publish_date = date
