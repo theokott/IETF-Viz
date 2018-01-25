@@ -23,6 +23,8 @@ import _pickle as pickle
 import svgwrite
 import datetime
 from math import pi, sin, cos
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
 from svgwrite import cm, mm
 # import graphviz
 # import pydot as pd
@@ -160,11 +162,14 @@ def build_doc(rfc_num):
 
 
 def get_doc(rfc_num):
+    print("GETTING", rfc_num)
+
     if rfc_num in doc_cache.keys():
         return doc_cache[rfc_num]
 
     else:
         build_doc(rfc_num)
+        print("BUILT", rfc_num)
         return doc_cache[rfc_num]
 
 
@@ -182,6 +187,8 @@ def add_reference_to_graph(G, reference):
 # Wrap calls to build_doc in future for asynchronous
 def get_related_docs(root):
     incomplete_references = []
+    executor = ThreadPoolExecutor(max_workers=500)
+    futures = []
     references = []
 
     relationships = get_relationships(root.draft_name)
@@ -203,10 +210,15 @@ def get_related_docs(root):
         else:
             incomplete_references.append((new_reference, target_doc_id))
 
+
             # If the document hasn't been cached, make an async request to make and cache it
-            build_doc(target_doc_id)
+            futures.append(executor.submit(get_doc, target_doc_id))
+
+            # build_doc(target_doc_id)
 
     # Now wait for all of async requests to complete, which should roughly be at the same time
+    for future in as_completed(futures):
+        future.result()
 
     for reference in incomplete_references:
         target_doc_id = reference[1]
@@ -397,7 +409,7 @@ def draw_svg(name):
 def main():
     G = nx.MultiDiGraph()
 
-    unpickle_caches()
+    # unpickle_caches()
 
     rfc_num = 'RFC' + input('Enter the requested RFC number: ')
 
@@ -419,7 +431,7 @@ def main():
 
     print('Drawing graph...')
     draw_graph(G)
-    nx.drawing.nx_pydot.write_dot(G, 'graph.dot')
+    # nx.drawing.nx_pydot.write_dot(G, 'graph.dot')
 
     # timeline = get_obs_docs(rfc_num)
 
