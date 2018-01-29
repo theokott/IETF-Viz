@@ -1,23 +1,13 @@
 # TODO:
-#      Better structure for docs, colors and labels
-#           - Make interesting and useful
-#           - Multiple references between same pair of docs overlap
-#           - Still need to add that info to the actual classes...
-#      Is the graph accurate?
-#      Is it a tree?
-#      Smarten up code
-#           - references used too much in future_get_related_docs()
-#           - is there a way to recursively call asynchronously?
-#           - Lambda func for passing args to callback?
-#       Need to edit generated Dot/Graphviz files to improve layout
-#           - Ranksep
-#           - Clusters?
-#       REFACTOR GET RELATED DOCS
+#       NOT ALL DOCS HAVE RFC NUMBERS! NEED TO CACHE BASED ON NAME!
+#       BCP and STDs do not have to consist of one doc, should be considered separate entities that are sometimes the
+#           same as an RFC
 
 import requests as rq
 import networkx as nx
 import matplotlib.pyplot as plt
 import documents as doc
+import drawing
 from requests_futures.sessions import FuturesSession
 import _pickle as pickle
 import svgwrite
@@ -59,7 +49,12 @@ def get_group_info(sess, resp):
 def get_doc_info(sess, resp):
     json = resp.json()
 
-    doc_id = "RFC" + json["rfc"]
+    if json["rfc"] is None:
+        doc_id = json["name"]
+
+    else:
+        doc_id = "RFC" + json["rfc"]
+
     updated_doc = doc_cache[doc_id]
     updated_doc.set_draft_name(json["name"])
     updated_doc.set_title(json["title"])
@@ -77,14 +72,23 @@ def resolve_doc_url(sess, resp):
     if doc_id[0:3] != 'RFC':
         request = rq.get(base + doc_url)
         rfc_num = request.json()["rfc"]
-        alt_doc_id = doc_id
-        doc_id = "RFC" + rfc_num
+        print("DOC ID", doc_id, "rfc_num", rfc_num, rfc_num is None)
 
-        new_doc = doc.RFC(doc_id)
-        new_doc.set_draft_url(doc_url)
+        if rfc_num is None:
+            new_doc = doc.RFC(doc_id)
+            new_doc.set_draft_url(doc_url)
 
-        doc_cache[new_doc.id] = new_doc
-        doc_cache[alt_doc_id] = doc_cache[doc_id]
+            doc_cache[new_doc.id] = new_doc
+        else:
+            alt_doc_id = doc_id
+            print(alt_doc_id)
+            new_doc_id = "RFC" + rfc_num
+            new_doc = doc.RFC(new_doc_id)
+            new_doc.set_draft_url(doc_url)
+
+            doc_cache[new_doc.id] = new_doc
+            doc_cache[alt_doc_id] = doc_cache[new_doc_id]
+            print("Link made between:", new_doc_id, alt_doc_id)
 
     else:
         new_doc = doc.RFC(doc_id)
@@ -162,7 +166,6 @@ def build_doc(rfc_num):
 
 
 def get_doc(rfc_num):
-    print("GETTING", rfc_num)
 
     if rfc_num in doc_cache.keys():
         return doc_cache[rfc_num]
@@ -185,7 +188,7 @@ def add_reference_to_graph(G, reference):
 
 
 # Wrap calls to build_doc in future for asynchronous
-def get_related_docs(root):
+def get_source_references(root):
     incomplete_references = []
     executor = ThreadPoolExecutor(max_workers=500)
     futures = []
@@ -203,18 +206,8 @@ def get_related_docs(root):
         target_split = relationship.get('target').split('/')
         target_doc_id = target_split[-2].upper()
 
-        if target_doc_id in doc_cache:
-            target_doc = doc_cache[target_doc_id]
-            new_reference.set_target(target_doc)
-            references.append(new_reference)
-        else:
-            incomplete_references.append((new_reference, target_doc_id))
-
-
-            # If the document hasn't been cached, make an async request to make and cache it
-            futures.append(executor.submit(get_doc, target_doc_id))
-
-            # build_doc(target_doc_id)
+        incomplete_references.append((new_reference, target_doc_id))
+        futures.append(executor.submit(get_doc, target_doc_id))
 
     # Now wait for all of async requests to complete, which should roughly be at the same time
     for future in as_completed(futures):
@@ -234,7 +227,7 @@ def find_related_docs(G, root, level):
         return
 
     if root.id not in reference_cache.keys():
-        references = get_related_docs(root)
+        references = get_source_references(root)
 
     else:
         references = reference_cache[root.id]
@@ -273,6 +266,7 @@ def draw_graph(G):
 def unpickle_caches():
     global doc_cache
     global reference_cache
+    global group_cache
 
     try:
 
@@ -294,6 +288,16 @@ def unpickle_caches():
     except FileNotFoundError:
         print("No reference cache found!")
 
+    try:
+
+        group_cache_file = open('groups.pickle', 'rb')
+        group_cache = pickle.load(group_cache_file)
+        group_cache_file.close()
+        print("Loaded group cache")
+
+    except FileNotFoundError:
+        print("No group cache found!")
+
 
 def pickle_caches():
     global doc_cache
@@ -308,6 +312,11 @@ def pickle_caches():
     pickle.dump(reference_cache, reference_cache_file, protocol=-1)
     reference_cache_file.close()
     print("Reference cache written to disk!")
+
+    group_cache_file = open('groups.pickle', 'wb')
+    pickle.dump(group_cache, group_cache_file, protocol=-1)
+    group_cache_file.close()
+    print("Group cache written to disk!")
 
 def draw_circle_graph(rfc_num):
     og = nx.MultiDiGraph()
@@ -346,7 +355,7 @@ def draw_circle_graph(rfc_num):
 # Encode status (is it a draft?)
 # Scale position based on date
 # Split into smaller functions
-def draw_timeline(timeline):
+def draw_timeline(timeline, img_size):
 
     # Define constants for size of ellipses and edges
     rx = 90
@@ -360,22 +369,80 @@ def draw_timeline(timeline):
     x0 = (size * 2 * rx) + ((size - 1) * sep) + x_buffer
     y0 = ry + y_buffer
 
-    dwg = svgwrite.Drawing(filename="obs-graph.svg", debug=True)
+    dwg = svgwrite.Drawing(filename="obs-graph.svg", debug=False, size=(img_size, 500))
 
     dwg.add(dwg.line(start=(x_buffer + 2*rx, y0), end=(x0, y0), stroke='black', stroke_width=2))
 
     count = 0
     for doc in timeline:
-        print(doc)
         new_x = x0 - ((sep + (2 * rx)) * count)
 
-        if doc is None:
-            dwg.add(dwg.line(start=(new_x, y0 + 10), end=(new_x, y0 - 10), stroke='black', stroke_width=2))
+        if count == 0:
+            colour = '#5555ff'
         else:
-            dwg.add(dwg.ellipse(center=(new_x, y0), r=(rx, ry),
-                                fill='#bbbbff', stroke='black', stroke_width=1))
-            dwg.add(dwg.text(text=doc.id, insert=(new_x - rx/2, y0)))
+            colour = '#bbbbff'
+
+        dwg.add(dwg.ellipse(center=(new_x, y0), r=(rx, ry),
+                            fill=colour, stroke='black', stroke_width=1))
+        dwg.add(dwg.text(text=doc.id, insert=(new_x - rx/2, y0)))
         count = count + 1
+
+        if count == len(timeline):
+            old_x = new_x
+            new_x = x0 - ((sep + (2 * rx)) * count)
+            dwg.add(dwg.line(start=(new_x, y0 + 10), end=(new_x, y0 - 10), stroke='black', stroke_width=2))
+            dwg.add(dwg.line(start=(new_x, y0), end=(old_x, y0), stroke='black', stroke_width=2))
+
+    dwg.save()
+
+
+def draw_timeline_areas(areas, time_delta, start_date, end_date):
+
+    # Define constants for size of ellipses and edges
+    rx = 90
+    ry = 50
+    lane_sep = 70
+    x_buffer = rx + 20
+    y_buffer = ry + 20
+    length = time_delta.days + (2 * x_buffer) + rx
+
+    num_of_groups = 1
+
+    for area in areas.values():
+        for group in area.groups.values():
+            num_of_groups = num_of_groups + 1
+
+    height = (y_buffer * 2) + (num_of_groups * 2 * ry) + (num_of_groups * lane_sep)
+
+    # size of n ellipses + size of n-1 lines + buffer
+
+    dwg = svgwrite.Drawing(filename="timeline.svg", debug=False, size=(length, height))
+
+    # dwg.add(dwg.line(start=(x_buffer + 2*rx, y0), end=(x0, y0), stroke='black', stroke_width=2))
+
+    area_count = 0
+    y_offset = 0
+    for area in areas.values():
+        group_count = 0
+        for group in area.groups.values():
+
+            # Draw group track lines
+            dwg.add(dwg.line(
+                start=(0, y_offset), end=(length, y_offset), stroke='black', stroke_width=2))
+            dwg.add(dwg.line(
+                start=(0, y_offset + 150), end=(length, y_offset + 150), stroke='black', stroke_width=2))
+
+            y_offset = y_offset + 150
+            y = y_offset + y_buffer
+
+            for doc in group.references:
+                x = (doc.target.publish_date - start_date).days + x_buffer + rx
+                name_text = doc.target.publish_date
+
+                dwg.add(dwg.ellipse(
+                    center=(x, y), r=(rx, ry),fill='#5555ff', stroke='black', stroke_width=1))
+                dwg.add(dwg.text(text=name_text, insert=(x - rx / 2, y)))
+
 
     dwg.save()
 
@@ -384,58 +451,106 @@ def get_obs_docs(rfc_num):
 
     timeline = [doc_cache[rfc_num]]
 
-    is_end = True
-
     #   WHAT IF WE HAVEN'T ADDED THE REFENCES?
-    for ref in reference_cache[rfc_num]:
+    for ref in get_source_references(get_doc(rfc_num)):
         if ref.type == "obs":
-            is_end = False
             timeline = timeline + get_obs_docs(ref.target.id)
 
-    if is_end:
-        return timeline + [None]
-    else:
-        return timeline
+    return timeline
 
 
+def get_date(doc):
+    return doc.publish_date
 
-def draw_svg(name):
-    dwg = svgwrite.Drawing('test.svg', profile='tiny')
-    dwg.add(dwg.line((0, 0), (10, 0), stroke=svgwrite.rgb(10, 10, 16, '%')))
-    dwg.add(dwg.text('Test', insert=(0, 0.2)))
-    dwg.save()
+
+def filter_references(references):
+    filter_lambda = (lambda x: x.type == "refold" or
+                               x.type == "refinfo" or
+                               x.type == "refnorm" or
+                               x.type == "refunk"
+                     )
+    return list(filter(filter_lambda, references))
+
+
+def generate_timeline(rfc_num):
+
+    references = get_source_references(get_doc(rfc_num))
+    references.sort(key=(lambda x: x.target.publish_date), reverse=True)
+    references = filter_references(references)
+
+    end_date = references[0].target.publish_date
+    start_date = references[-1].target.publish_date
+
+    time_delta = end_date - start_date
+    print("TIME RANGE:", time_delta, references[0].target.publish_date, "-", references[-1].target.publish_date)
+
+    docs = list(map(lambda x:x.target, references))
+
+    areas = {}
+
+    for reference in references:
+        if reference.target.area.name not in areas.keys():
+            new_area = drawing.DrawingArea(reference.target.area.name)
+            new_group = drawing.DrawingGroup(reference.target.group.name)
+            new_group.add_reference(reference)
+            new_area.add_group(new_group)
+            areas[reference.target.area.name] = new_area
+
+        else:
+            if reference.target.group.name not in areas[reference.target.area.name].groups.keys():
+                new_group = drawing.DrawingGroup(reference.target.group.name)
+                new_group.add_reference(reference)
+                areas[reference.target.area.name].add_group(new_group)
+            else:
+                areas[reference.target.area.name]\
+                    .groups[reference.target.group.name]\
+                    .add_reference(reference)
+
+    # for area in areas.keys():
+    #     print("\nAREA:", area, areas[area].groups.keys())
+    #     for group in areas[area].groups.keys():
+    #         print("\tGROUP:", areas[area].groups[group].name)
+    #         for doc in areas[area].groups[group].references:
+    #             print("\t\tDOC", doc.target.draft_name)
+
+    draw_timeline_areas(areas, time_delta, start_date, end_date)
+
+
+    areas = {}
+    groups = {}
+    # for reference in references:
+    #     print(reference.type == "obs" or reference.type == "refinfo" or reference.type == "refnorm" or reference.type == "refold" or reference.type == "refunk", reference.type)
+    #     areas[reference.target.area.id] = reference.target.area
+    #     groups[reference.target.group.id] = reference.target.group
+    #     print(reference.target.area.name, reference.target.group.name)
+
+    draft_timeline = get_obs_docs(rfc_num)
+    draft_timeline.sort(key=get_date, reverse=True)
 
 
 def main():
     G = nx.MultiDiGraph()
 
-    # unpickle_caches()
 
     rfc_num = 'RFC' + input('Enter the requested RFC number: ')
 
-    deg_of_separation = input('Enter the degree of separation: ')
+    # deg_of_separation = input('Enter the degree of separation: ')
 
     root_doc = get_doc(rfc_num)
 
-    G.add_node(root_doc)
+    # G.add_node(root_doc)
     doc_cache[root_doc.id] = root_doc
 
-    print('\n' + ('=' * len(root_doc.draft_name)))
-    print(root_doc.draft_name)
-    print(('=' * len(root_doc.draft_name)) + '\n')
+    # find_related_docs(G, root_doc, int(deg_of_separation))
 
-    print('Building graph...')
-    find_related_docs(G, root_doc, int(deg_of_separation))
-
-    # pickle_caches()
-
-    print('Drawing graph...')
-    draw_graph(G)
+    # print('Drawing graph...')
+    # draw_graph(G)
     # nx.drawing.nx_pydot.write_dot(G, 'graph.dot')
 
-    # timeline = get_obs_docs(rfc_num)
+    generate_timeline(rfc_num)
 
-    # draw_timeline(timeline)
     # draw_circle_graph(rfc_num)
 
+unpickle_caches()
 main()
+pickle_caches()
