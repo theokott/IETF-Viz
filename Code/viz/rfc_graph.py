@@ -401,7 +401,7 @@ def draw_timeline_areas(areas, time_delta, start_date, end_date):
     # Define constants for size of ellipses and edges
     rx = 90
     ry = 50
-    lane_sep = 70
+    track_height = 150
     x_buffer = rx + 20
     y_buffer = ry + 20
     length = time_delta.days + (2 * x_buffer) + rx
@@ -412,7 +412,7 @@ def draw_timeline_areas(areas, time_delta, start_date, end_date):
         for group in area.groups.values():
             num_of_groups = num_of_groups + 1
 
-    height = (y_buffer * 2) + (num_of_groups * 2 * ry) + (num_of_groups * lane_sep)
+    height = (y_buffer * 2) + (num_of_groups * 2 * ry) + (num_of_groups * track_height)
 
     # size of n ellipses + size of n-1 lines + buffer
 
@@ -421,28 +421,31 @@ def draw_timeline_areas(areas, time_delta, start_date, end_date):
     # dwg.add(dwg.line(start=(x_buffer + 2*rx, y0), end=(x0, y0), stroke='black', stroke_width=2))
 
     area_count = 0
-    y_offset = 0
+    y_offset = 0 + y_buffer
     for area in areas.values():
         group_count = 0
+        colour = drawing.colours[area_count]
+        track_colour = drawing.track_colours[area_count]
         for group in area.groups.values():
+            dwg.add(dwg.rect(
+                insert=(0,y_offset), size=(length, track_height), fill=track_colour, stroke='#000000'))
 
-            # Draw group track lines
-            dwg.add(dwg.line(
-                start=(0, y_offset), end=(length, y_offset), stroke='black', stroke_width=2))
-            dwg.add(dwg.line(
-                start=(0, y_offset + 150), end=(length, y_offset + 150), stroke='black', stroke_width=2))
+            dwg.add(dwg.text(
+                text=group.name, insert=(0,y_offset + track_height/2), rotate=[90], textLength=[track_height]
+            ))
 
-            y_offset = y_offset + 150
             y = y_offset + y_buffer
+            y_offset = y_offset + track_height
 
             for doc in group.references:
                 x = (doc.target.publish_date - start_date).days + x_buffer + rx
                 name_text = doc.target.publish_date
 
                 dwg.add(dwg.ellipse(
-                    center=(x, y), r=(rx, ry),fill='#5555ff', stroke='black', stroke_width=1))
+                    center=(x, y), r=(rx, ry),fill=colour, stroke='#000000', stroke_width=1))
                 dwg.add(dwg.text(text=name_text, insert=(x - rx / 2, y)))
 
+        area_count = area_count + 1
 
     dwg.save()
 
