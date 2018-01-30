@@ -15,9 +15,6 @@ import datetime
 from math import pi, sin, cos
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
-from svgwrite import cm, mm
-# import graphviz
-# import pydot as pd
 
 base = 'https://datatracker.ietf.org'
 
@@ -30,8 +27,17 @@ reference_cache = {}
 
 # A dictionary of groups indexed on their id (such as group_cache[1027])
 group_cache = {}
-
 session = FuturesSession(max_workers=50)
+
+
+rx = 90
+ry = 50
+x_buffer = rx + 20
+y_buffer = ry + 20
+track_height = 150
+track_title = 50
+length = 1000
+height = 1000
 
 
 def get_group_info(sess, resp):
@@ -396,56 +402,95 @@ def draw_timeline(timeline, img_size):
     dwg.save()
 
 
-def draw_timeline_areas(areas, time_delta, start_date, end_date):
-
-    # Define constants for size of ellipses and edges
-    rx = 90
-    ry = 50
-    track_height = 150
-    x_buffer = rx + 20
-    y_buffer = ry + 20
-    length = time_delta.days + (2 * x_buffer) + rx
-
-    num_of_groups = 1
-
-    for area in areas.values():
-        for group in area.groups.values():
-            num_of_groups = num_of_groups + 1
-
-    height = (y_buffer * 2) + (num_of_groups * 2 * ry) + (num_of_groups * track_height)
-
-    # size of n ellipses + size of n-1 lines + buffer
-
-    dwg = svgwrite.Drawing(filename="timeline.svg", debug=False, size=(length, height))
-
-    # dwg.add(dwg.line(start=(x_buffer + 2*rx, y0), end=(x0, y0), stroke='black', stroke_width=2))
-
-    area_count = 0
+def draw_tracks(areas, dwg):
     y_offset = 0 + y_buffer
+    area_count = 0
+
     for area in areas.values():
-        group_count = 0
-        colour = drawing.colours[area_count]
         track_colour = drawing.track_colours[area_count]
         for group in area.groups.values():
             dwg.add(dwg.rect(
                 insert=(0,y_offset), size=(length, track_height), fill=track_colour, stroke='#000000'))
 
             dwg.add(dwg.text(
-                text=group.name, insert=(0,y_offset + track_height/2), rotate=[90], textLength=[track_height]
+                text=group.name, insert=(0,y_offset + track_height/2),
+                textLength=[track_title], lengthAdjust='spacing'
             ))
 
-            y = y_offset + y_buffer
+            y_offset = y_offset + track_height
+
+        area_count = area_count + 1
+
+
+def draw_docs(areas, dwg, start_date):
+    area_count = 0
+    y_offset = 0 + y_buffer
+
+    for area in areas.values():
+        colour = drawing.colours[area_count]
+
+        for group in area.groups.values():
+            doc_y = y_offset + (track_height/2)
             y_offset = y_offset + track_height
 
             for doc in group.references:
-                x = (doc.target.publish_date - start_date).days + x_buffer + rx
-                name_text = doc.target.publish_date
+                doc_x = (doc.target.publish_date - start_date).days + x_buffer + track_title + rx
+                text_x = doc_x - rx
+                name_text = doc.target.draft_name
 
                 dwg.add(dwg.ellipse(
-                    center=(x, y), r=(rx, ry),fill=colour, stroke='#000000', stroke_width=1))
-                dwg.add(dwg.text(text=name_text, insert=(x - rx / 2, y)))
+                    center=(doc_x, doc_y), r=(rx, ry),fill=colour, stroke='#000000', stroke_width=1))
+                dwg.add(dwg.text(
+                    text=name_text, insert=(text_x, doc_y), textLength=str(2 * rx), lengthAdjust='spacingAndGlyphs',
+                    dy='0.35em'
+                ))
 
         area_count = area_count + 1
+
+
+def draw_scale(dwg, start_date, end_date, num_of_groups):
+    left_x = x_buffer + track_title + rx
+    right_x = left_x + (end_date - start_date).days
+    y = (track_height * num_of_groups) + y_buffer - (track_height/2)
+
+    print("right_x", right_x, "left_x", left_x, "y", y, "img height", height)
+
+    dwg.add(dwg.line(
+            start=(left_x, y), end=(right_x, y), stroke='#000000', stroke_width=2
+            ))
+    dwg.add(dwg.line(
+            start=(left_x, y+20), end=(left_x, y-20), stroke='#000000', stroke_width=2
+            ))
+    dwg.add(dwg.line(
+        start=(right_x, y+20), end=(right_x, y-20), stroke='#000000', stroke_width=2
+    ))
+
+def draw_timeline_areas(areas, time_delta, start_date, end_date):
+
+    global rx
+    global ry
+    global track_height
+    global x_buffer
+    global y_buffer
+    global track_title
+    global length
+    global height
+
+    # Define constants for size of ellipses and edges
+    length = time_delta.days + (2 * x_buffer) + rx + track_title
+
+    num_of_groups = 1
+
+    for area in areas.values():
+        num_of_groups = num_of_groups + len(area.groups.values())
+
+    height = (y_buffer * 2) + (num_of_groups * track_height)
+
+    dwg = svgwrite.Drawing(filename="timeline.svg", debug=False, size=(length, height))
+
+    draw_tracks(areas, dwg)
+    draw_docs(areas, dwg, start_date)
+    draw_scale(dwg, start_date, end_date, num_of_groups)
 
     dwg.save()
 
