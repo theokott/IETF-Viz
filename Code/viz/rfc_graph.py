@@ -35,7 +35,8 @@ ry = 50
 x_buffer = rx + 20
 y_buffer = ry + 20
 track_height = 150
-track_title = 50
+track_title_length = 50
+area_title_length = 150
 length = 1000
 height = 1000
 
@@ -402,19 +403,45 @@ def draw_timeline(timeline, img_size):
     dwg.save()
 
 
-def draw_tracks(areas, dwg):
+def draw_areas(areas, dwg):
     y_offset = 0 + y_buffer
     area_count = 0
 
     for area in areas.values():
         track_colour = drawing.track_colours[area_count]
+        area_height = len(area.groups.values()) * track_height
+        y_title = y_offset + (area_height / 2)
+
+        dwg.add(dwg.rect(
+            insert=(x_buffer, y_offset), size=(area_title_length, area_height),
+            fill=track_colour, stroke='#000000'))
+
+        dwg.add(dwg.text(
+            text=area.name, insert=(x_buffer + 10, y_offset + 10),
+            textLength=[area_title_length], lengthAdjust='spacing',
+            writing_mode='tb'
+        ))
+
+        area_count = area_count + 1
+        y_offset = y_offset + area_height
+
+
+def draw_tracks(areas, dwg):
+    y_offset = 0 + y_buffer
+    area_count = 0
+    x = x_buffer + area_title_length
+
+    for area in areas.values():
+        track_colour = drawing.track_colours[area_count]
         for group in area.groups.values():
+            y_title = y_offset + 20
+
             dwg.add(dwg.rect(
-                insert=(0,y_offset), size=(length, track_height), fill=track_colour, stroke='#000000'))
+                insert=(x,y_offset), size=(length, track_height), fill=track_colour, stroke='#000000'))
 
             dwg.add(dwg.text(
-                text=group.name, insert=(0,y_offset + track_height/2),
-                textLength=[track_title], lengthAdjust='spacing'
+                text=group.name, insert=(x + 10, y_title),
+                textLength=[track_height], lengthAdjust='spacing'
             ))
 
             y_offset = y_offset + track_height
@@ -433,13 +460,26 @@ def draw_docs(areas, dwg, start_date):
             doc_y = y_offset + (track_height/2)
             y_offset = y_offset + track_height
 
-            for doc in group.references:
-                doc_x = (doc.target.publish_date - start_date).days + x_buffer + track_title + rx
+            for reference in group.references:
+                doc_x = (reference.target.publish_date - start_date).days\
+                        + x_buffer + track_title_length + rx + area_title_length
                 text_x = doc_x - rx
-                name_text = doc.target.draft_name
+                name_text = reference.target.draft_name
+
+                print(reference.target.draft_name, reference.type, reference.target.publish_date)
+                if reference.type == "refinfo":
+                    width = 1
+                    stroke_style = "10, 0"
+                elif reference.type == "refnorm":
+                    width = 4
+                    stroke_style = "10, 0"
+                else:
+                    width = 4
+                    stroke_style = "10, 5"
 
                 dwg.add(dwg.ellipse(
-                    center=(doc_x, doc_y), r=(rx, ry),fill=colour, stroke='#000000', stroke_width=1))
+                    center=(doc_x, doc_y), r=(rx, ry),fill=colour,
+                    stroke='#000000', stroke_width=width, stroke_dasharray= stroke_style))
                 dwg.add(dwg.text(
                     text=name_text, insert=(text_x, doc_y), textLength=str(2 * rx), lengthAdjust='spacingAndGlyphs',
                     dy='0.35em'
@@ -449,7 +489,7 @@ def draw_docs(areas, dwg, start_date):
 
 
 def draw_scale(dwg, start_date, end_date, num_of_groups):
-    left_x = x_buffer + track_title + rx
+    left_x = x_buffer + track_title_length + rx + area_title_length
     right_x = left_x + (end_date - start_date).days
     y = (track_height * num_of_groups) + y_buffer - (track_height/2)
 
@@ -472,12 +512,12 @@ def draw_timeline_areas(areas, time_delta, start_date, end_date):
     global track_height
     global x_buffer
     global y_buffer
-    global track_title
+    global track_title_length
     global length
     global height
 
     # Define constants for size of ellipses and edges
-    length = time_delta.days + (2 * x_buffer) + rx + track_title
+    length = time_delta.days + (2 * x_buffer) + (2 * rx) + track_title_length + area_title_length
 
     num_of_groups = 1
 
@@ -488,6 +528,7 @@ def draw_timeline_areas(areas, time_delta, start_date, end_date):
 
     dwg = svgwrite.Drawing(filename="timeline.svg", debug=False, size=(length, height))
 
+    draw_areas(areas, dwg)
     draw_tracks(areas, dwg)
     draw_docs(areas, dwg, start_date)
     draw_scale(dwg, start_date, end_date, num_of_groups)
@@ -554,26 +595,10 @@ def generate_timeline(rfc_num):
                     .groups[reference.target.group.name]\
                     .add_reference(reference)
 
-    # for area in areas.keys():
-    #     print("\nAREA:", area, areas[area].groups.keys())
-    #     for group in areas[area].groups.keys():
-    #         print("\tGROUP:", areas[area].groups[group].name)
-    #         for doc in areas[area].groups[group].references:
-    #             print("\t\tDOC", doc.target.draft_name)
-
     draw_timeline_areas(areas, time_delta, start_date, end_date)
 
-
-    areas = {}
-    groups = {}
-    # for reference in references:
-    #     print(reference.type == "obs" or reference.type == "refinfo" or reference.type == "refnorm" or reference.type == "refold" or reference.type == "refunk", reference.type)
-    #     areas[reference.target.area.id] = reference.target.area
-    #     groups[reference.target.group.id] = reference.target.group
-    #     print(reference.target.area.name, reference.target.group.name)
-
-    draft_timeline = get_obs_docs(rfc_num)
-    draft_timeline.sort(key=get_date, reverse=True)
+    # draft_timeline = get_obs_docs(rfc_num)
+    # draft_timeline.sort(key=get_date, reverse=True)
 
 
 def main():
