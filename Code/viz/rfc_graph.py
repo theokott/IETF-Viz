@@ -2,6 +2,11 @@
 #       NOT ALL DOCS HAVE RFC NUMBERS! NEED TO CACHE BASED ON NAME!
 #       BCP and STDs do not have to consist of one doc, should be considered separate entities that are sometimes the
 #           same as an RFC
+#       CSS and HTML for styling and presentation!
+#       Arrows showing relationships
+#       Handle overlaps (bars showing timespan of some kind?)
+#       Show the doc in question
+#       Show future docs!
 
 import requests as rq
 import networkx as nx
