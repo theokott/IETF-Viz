@@ -330,6 +330,7 @@ def pickle_caches():
     group_cache_file.close()
     print("Group cache written to disk!")
 
+
 def draw_circle_graph(rfc_num):
     og = nx.MultiDiGraph()
     obs_refs = []
@@ -362,51 +363,6 @@ def draw_circle_graph(rfc_num):
     dwg.add(dwg.ellipse(center=(x0 + (buffer * 3), y0 + buffer), r=(radius*3, radius),
                        fill='blue', stroke='black', stroke_width=1))
     dwg.save()
-
-
-# Encode status (is it a draft?)
-# Scale position based on date
-# Split into smaller functions
-def draw_timeline(timeline, img_size):
-
-    # Define constants for size of ellipses and edges
-    rx = 90
-    ry = 50
-    sep = 70
-    x_buffer = rx + 20
-    y_buffer = ry + 20
-    size = len(timeline)
-
-    # size of n ellipses + size of n-1 lines + buffer
-    x0 = (size * 2 * rx) + ((size - 1) * sep) + x_buffer
-    y0 = ry + y_buffer
-
-    dwg = svgwrite.Drawing(filename="obs-graph.svg", debug=False, size=(img_size, 500))
-
-    dwg.add(dwg.line(start=(x_buffer + 2*rx, y0), end=(x0, y0), stroke='black', stroke_width=2))
-
-    count = 0
-    for doc in timeline:
-        new_x = x0 - ((sep + (2 * rx)) * count)
-
-        if count == 0:
-            colour = '#5555ff'
-        else:
-            colour = '#bbbbff'
-
-        dwg.add(dwg.ellipse(center=(new_x, y0), r=(rx, ry),
-                            fill=colour, stroke='black', stroke_width=1))
-        dwg.add(dwg.text(text=doc.id, insert=(new_x - rx/2, y0)))
-        count = count + 1
-
-        if count == len(timeline):
-            old_x = new_x
-            new_x = x0 - ((sep + (2 * rx)) * count)
-            dwg.add(dwg.line(start=(new_x, y0 + 10), end=(new_x, y0 - 10), stroke='black', stroke_width=2))
-            dwg.add(dwg.line(start=(new_x, y0), end=(old_x, y0), stroke='black', stroke_width=2))
-
-    dwg.save()
-
 
 def draw_areas(areas, dwg):
     y_offset = 0 + y_buffer
@@ -465,18 +421,21 @@ def draw_docs(areas, dwg, start_date):
             doc_y = y_offset + (track_height/2)
             y_offset = y_offset + track_height
 
-            for reference in group.references:
-                doc_x = (reference.target.publish_date - start_date).days\
+            for doc in group.documents:
+                doc_x = (doc.document.publish_date - start_date).days\
                         + x_buffer + track_title_length + rx + area_title_length
                 text_x = doc_x - rx
-                name_text = reference.target.draft_name
+                name_text = doc.document.draft_name
 
-                print(reference.target.draft_name, reference.type, reference.target.publish_date)
-                if reference.type == "refinfo":
+                print(doc.document.draft_name, doc.reference_type, doc.document.publish_date)
+                if doc.reference_type == "refinfo":
                     width = 1
                     stroke_style = "10, 0"
-                elif reference.type == "refnorm":
+                elif doc.reference_type == "refnorm":
                     width = 4
+                    stroke_style = "10, 0"
+                elif doc.reference_type == "root":
+                    width = 10
                     stroke_style = "10, 0"
                 else:
                     width = 4
@@ -510,7 +469,7 @@ def draw_scale(dwg, start_date, end_date, num_of_groups):
         start=(right_x, y+20), end=(right_x, y-20), stroke='#000000', stroke_width=2
     ))
 
-def draw_timeline_areas(areas, time_delta, start_date, end_date):
+def draw_timeline(areas, time_delta, start_date, end_date):
 
     global rx
     global ry
@@ -572,38 +531,52 @@ def generate_timeline(rfc_num):
     references.sort(key=(lambda x: x.target.publish_date), reverse=True)
     references = filter_references(references)
 
-    end_date = references[0].target.publish_date
+    end_date = references[0].source.publish_date
     start_date = references[-1].target.publish_date
 
     time_delta = end_date - start_date
-    print("TIME RANGE:", time_delta, references[0].target.publish_date, "-", references[-1].target.publish_date)
+    print("TIME RANGE:", time_delta, references[0].source.publish_date, "-", references[-1].target.publish_date)
 
     docs = list(map(lambda x:x.target, references))
 
     areas = {}
 
     for reference in references:
+        new_document = drawing.DrawingDoc(reference.target, reference.type)
         if reference.target.area.name not in areas.keys():
             new_area = drawing.DrawingArea(reference.target.area.name)
             new_group = drawing.DrawingGroup(reference.target.group.name)
-            new_group.add_reference(reference)
+            new_group.add_document(new_document)
             new_area.add_group(new_group)
             areas[reference.target.area.name] = new_area
 
         else:
             if reference.target.group.name not in areas[reference.target.area.name].groups.keys():
                 new_group = drawing.DrawingGroup(reference.target.group.name)
-                new_group.add_reference(reference)
+                new_group.add_document(new_document)
                 areas[reference.target.area.name].add_group(new_group)
             else:
-                areas[reference.target.area.name]\
-                    .groups[reference.target.group.name]\
-                    .add_reference(reference)
+                areas[reference.target.area.name].groups[reference.target.group.name].add_document(new_document)
 
-    draw_timeline_areas(areas, time_delta, start_date, end_date)
+    root = references[0].source
+    new_document = drawing.DrawingDoc(root, "root")
+    if root.area.name not in areas.keys():
+        new_area = drawing.DrawingArea(root.area.name)
+        new_group = drawing.DrawingGroup(root.group.name)
+        new_group.add_document(new_document)
+        new_area.add_group(new_group)
+        areas[root.area.name] = new_area
 
-    # draft_timeline = get_obs_docs(rfc_num)
-    # draft_timeline.sort(key=get_date, reverse=True)
+    else:
+        if root.group.name not in areas[root.area.name].groups.keys():
+            new_group = drawing.DrawingGroup(root.group.name)
+            new_group.add_document(new_document)
+            areas[root.area.name].add_group(new_group)
+        else:
+            areas[root.area.name].groups[root.group.name].add_document(new_document)
+
+
+    draw_timeline(areas, time_delta, start_date, end_date)
 
 
 def main():
