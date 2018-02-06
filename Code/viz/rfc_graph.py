@@ -5,6 +5,10 @@
 #       CSS and HTML for styling and presentation!
 #       Arrows showing relationships
 #       Handle overlaps (bars showing timespan of some kind?)
+#           - Doc first created to expiring with date published shown?
+#           - First docevent to published to last?
+#           - Need to iterate through the events because there could be more than 20, increase this to reduce calls?
+#           - Is expiry_date given always valid?
 #       Show the doc in question
 #       Show future docs!
 
@@ -122,6 +126,7 @@ def build_group(group_id):
     group_future = session.get(base + group_url, background_callback=get_group_info)
     group_future.result()
 
+
 def get_group(group_id):
     if group_id in group_cache.keys():
         return group_cache[group_id]
@@ -142,7 +147,7 @@ def build_doc(rfc_num):
     doc_future.result()
 
 
-    # Get the date that the document was published
+    # Get the date that the document was first created, published and expired
     events_json = rq.get(base + "/api/v1/doc/docevent/?doc=" + doc_cache[rfc_num].draft_name).json()
     events = events_json["objects"]
     for event in events:
@@ -161,6 +166,23 @@ def build_doc(rfc_num):
                                              second=int(time_split[2]))
 
             doc_cache[rfc_num].set_publish_date(publish_date)
+
+    creation_event = events[-1]
+
+    time_string = creation_event["time"]
+    date = time_string.split("T")[0]
+    date_split = date.split("-")
+    time = time_string.split("T")[1]
+    time_split = time.split(":")
+
+    creation_date = datetime.datetime(year=int(date_split[0]),
+                                    month=int(date_split[1]),
+                                    day=int(date_split[2]),
+                                    hour=int(time_split[0]),
+                                    minute=int(time_split[1]),
+                                    second=int(time_split[2]))
+
+    doc_cache[rfc_num].set_creation_date(creation_date)
 
     # Create the group that the doc is part of
     group_url = doc_cache[rfc_num].group_url
