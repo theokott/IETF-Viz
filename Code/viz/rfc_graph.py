@@ -9,8 +9,9 @@
 #           - First docevent to published to last?
 #           - Need to iterate through the events because there could be more than 20, increase this to reduce calls?
 #           - Is expiry_date given always valid?
-#       Show the doc in question
 #       Show future docs!
+#       Handle the big spaces at the start and end of the tracks
+#       Why does RFC 4561 give a blank track?
 
 import requests as rq
 import networkx as nx
@@ -39,7 +40,7 @@ group_cache = {}
 session = FuturesSession(max_workers=50)
 
 
-rx = 90
+rx = 150
 ry = 50
 x_buffer = rx + 20
 y_buffer = ry + 20
@@ -48,6 +49,8 @@ track_title_length = 50
 area_title_length = 150
 length = 1000
 height = 1000
+date_y_offset = 35
+date_x_offset = 70
 
 
 def get_group_info(sess, resp):
@@ -413,6 +416,7 @@ def draw_tracks(areas, dwg):
     y_offset = 0 + y_buffer
     area_count = 0
     x = x_buffer + area_title_length
+    track_length = length - track_title_length - area_title_length - (2 * x_buffer) + rx
 
     for area in areas.values():
         track_colour = drawing.track_colours[area_count]
@@ -420,7 +424,7 @@ def draw_tracks(areas, dwg):
             y_title = y_offset + 20
 
             dwg.add(dwg.rect(
-                insert=(x,y_offset), size=(length, track_height), fill=track_colour, stroke='#000000'))
+                insert=(x,y_offset), size=(track_length, track_height), fill=track_colour, stroke='#000000'))
 
             dwg.add(dwg.text(
                 text=group.name, insert=(x + 10, y_title),
@@ -440,16 +444,20 @@ def draw_docs(areas, dwg, start_date):
         colour = drawing.colours[area_count]
 
         for group in area.groups.values():
-            doc_y = y_offset + (track_height/2)
-            y_offset = y_offset + track_height
+
+            num_of_docs = len(group.documents)
+            doc_height = track_height/num_of_docs
+            doc_num = 1
+            print("DOC HEIGHT:", doc_height)
 
             for doc in group.documents:
                 doc_x = (doc.document.publish_date - start_date).days\
                         + x_buffer + track_title_length + rx + area_title_length
+                doc_y = y_offset + (doc_height * doc_num)
+                doc_length = 2 * rx
                 text_x = doc_x - rx
-                name_text = doc.document.draft_name
+                name_text = doc.document.title
 
-                print(doc.document.draft_name, doc.reference_type, doc.document.publish_date)
                 if doc.reference_type == "refinfo":
                     width = 1
                     stroke_style = "10, 0"
@@ -463,14 +471,17 @@ def draw_docs(areas, dwg, start_date):
                     width = 4
                     stroke_style = "10, 5"
 
-                dwg.add(dwg.ellipse(
-                    center=(doc_x, doc_y), r=(rx, ry),fill=colour,
+                # Draw the rectangle representing the doc
+                dwg.add(dwg.rect(
+                    insert=(doc_x-rx, doc_y - doc_height), size=(doc_length, doc_height),fill=colour,
                     stroke='#000000', stroke_width=width, stroke_dasharray= stroke_style))
+                # Draw the name of the doc
                 dwg.add(dwg.text(
-                    text=name_text, insert=(text_x, doc_y), textLength=str(2 * rx), lengthAdjust='spacingAndGlyphs',
-                    dy='0.35em'
+                    text=name_text, insert=(text_x, doc_y - doc_height/2), textLength=str(doc_length), lengthAdjust='spacingAndGlyphs'
                 ))
 
+                doc_num = doc_num + 1
+            y_offset = y_offset + track_height
         area_count = area_count + 1
 
 
@@ -481,15 +492,63 @@ def draw_scale(dwg, start_date, end_date, num_of_groups):
 
     print("right_x", right_x, "left_x", left_x, "y", y, "img height", height)
 
+    # Draw x axis
     dwg.add(dwg.line(
             start=(left_x, y), end=(right_x, y), stroke='#000000', stroke_width=2
             ))
+
+    # Draw caps for axis
     dwg.add(dwg.line(
             start=(left_x, y+20), end=(left_x, y-20), stroke='#000000', stroke_width=2
             ))
     dwg.add(dwg.line(
         start=(right_x, y+20), end=(right_x, y-20), stroke='#000000', stroke_width=2
     ))
+
+    # Draw dates at the end of each cap
+    dwg.add(dwg.text(
+        text=start_date, insert=(left_x - date_x_offset, y + date_y_offset)
+    ))
+    dwg.add(dwg.text(
+        text=end_date, insert=(right_x - date_x_offset, y + date_y_offset)
+    ))
+
+
+def draw_gridlines(dwg, start_date, end_date, num_of_groups):
+    left_x = x_buffer + track_title_length + rx + area_title_length
+    right_x = left_x + (end_date - start_date).days
+    track_bottom_y = (track_height * (num_of_groups - 1)) + y_buffer
+    timeline_y = (track_height * num_of_groups) + y_buffer - (track_height/2)
+
+    next_year = datetime.datetime(year=start_date.year + 1, month=1, day=1)
+    print("NEXT YEAR:", next_year)
+    time_delta = next_year - start_date
+    print("DELTA:", time_delta)
+
+    gridline_x = left_x + time_delta.days
+
+    while (end_date - next_year) > datetime.timedelta(days=0):
+
+        print("difference:", end_date - next_year, "next year:", next_year,)
+
+        # Draw grid line on tracks
+        dwg.add(dwg.line(
+            start=(gridline_x, track_bottom_y), end=(gridline_x, y_buffer), stroke='#111111', stroke_width=2, stroke_opacity='0.3'
+        ))
+        # Draw marker line on axis
+        dwg.add(dwg.line(
+            start=(gridline_x, timeline_y+10), end=(gridline_x, timeline_y-10), stroke='#000000', stroke_width=2
+        ))
+        # Draw date above timeline
+        dwg.add(dwg.text(
+            text=next_year, insert=(gridline_x - date_x_offset, timeline_y - date_y_offset)
+        ))
+
+        last_year = next_year
+        next_year = datetime.datetime(year=next_year.year + 1, month=1, day=1)
+        gridline_x = gridline_x + (next_year - last_year).days
+
+
 
 def draw_timeline(areas, time_delta, start_date, end_date):
 
@@ -516,8 +575,9 @@ def draw_timeline(areas, time_delta, start_date, end_date):
 
     draw_areas(areas, dwg)
     draw_tracks(areas, dwg)
-    draw_docs(areas, dwg, start_date)
     draw_scale(dwg, start_date, end_date, num_of_groups)
+    draw_gridlines(dwg, start_date, end_date, num_of_groups)
+    draw_docs(areas, dwg, start_date)
 
     dwg.save()
 

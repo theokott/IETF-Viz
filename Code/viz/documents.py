@@ -70,14 +70,8 @@ class RFC:
     def set_abstract(self, abs):
         self.abstract = abs
 
-    def set_group(self, group):
-        self.group = group
-
     def set_group_url(self, group_url):
         self.group_url = group_url
-
-    def set_area(self, area):
-        self.area = area
 
     def set_area_url(self, area_url):
         self.area_url = area_url
