@@ -12,6 +12,7 @@
 #       Show future docs!
 #       Handle the big spaces at the start and end of the tracks
 #       Why does RFC 4561 give a blank track?
+#       Show drafts of the root doc
 
 import requests as rq
 import networkx as nx
@@ -53,14 +54,28 @@ date_y_offset = 35
 date_x_offset = 70
 
 
+def convert_string_to_datetime(string):
+    date = string.split('T')[0]
+    date_split = date.split('-')
+    time = string.split('T')[1]
+    time_split = time.split(':')
+
+    return datetime.datetime(year=int(date_split[0]),
+                                     month=int(date_split[1]),
+                                     day=int(date_split[2]),
+                                     hour=int(time_split[0]),
+                                     minute=int(time_split[1]),
+                                     second=int(time_split[2]))
+
+
 def get_group_info(sess, resp):
     json = resp.json()
 
-    group_id = json["id"]
+    group_id = json['id']
 
     new_group = doc.Group(group_id)
-    new_group.set_name(json["name"])
-    new_group.set_parent_url(json["parent"])
+    new_group.set_name(json['name'])
+    new_group.set_parent_url(json['parent'])
 
     group_cache[group_id] = new_group
 
@@ -68,17 +83,21 @@ def get_group_info(sess, resp):
 def get_doc_info(sess, resp):
     json = resp.json()
 
-    if json["rfc"] is None:
-        doc_id = json["name"]
+    if json['rfc'] is None:
+        doc_id = json['name']
 
     else:
-        doc_id = "RFC" + json["rfc"]
+        doc_id = 'RFC' + json['rfc']
 
     updated_doc = doc_cache[doc_id]
-    updated_doc.set_draft_name(json["name"])
-    updated_doc.set_title(json["title"])
-    updated_doc.set_abstract(json["abstract"])
-    updated_doc.set_group_url(json["group"])
+    updated_doc.set_draft_name(json['name'])
+    updated_doc.set_title(json['title'])
+    updated_doc.set_abstract(json['abstract'])
+    updated_doc.set_group_url(json['group'])
+    if json['expires'] == None:
+        updated_doc.set_expiry_date(datetime.datetime.today())
+    else:
+        updated_doc.set_expiry_date(convert_string_to_datetime(json['expires']))
 
 
 def resolve_doc_url(sess, resp):
@@ -90,8 +109,8 @@ def resolve_doc_url(sess, resp):
     #   is made for convenience
     if doc_id[0:3] != 'RFC':
         request = rq.get(base + doc_url)
-        rfc_num = request.json()["rfc"]
-        print("DOC ID", doc_id, "rfc_num", rfc_num, rfc_num is None)
+        rfc_num = request.json()['rfc']
+        print('DOC ID', doc_id, 'rfc_num', rfc_num, rfc_num is None)
 
         if rfc_num is None:
             new_doc = doc.RFC(doc_id)
@@ -101,13 +120,13 @@ def resolve_doc_url(sess, resp):
         else:
             alt_doc_id = doc_id
             print(alt_doc_id)
-            new_doc_id = "RFC" + rfc_num
+            new_doc_id = 'RFC' + rfc_num
             new_doc = doc.RFC(new_doc_id)
             new_doc.set_draft_url(doc_url)
 
             doc_cache[new_doc.id] = new_doc
             doc_cache[alt_doc_id] = doc_cache[new_doc_id]
-            print("Link made between:", new_doc_id, alt_doc_id)
+            print('Link made between:', new_doc_id, alt_doc_id)
 
     else:
         new_doc = doc.RFC(doc_id)
@@ -125,7 +144,7 @@ def get_relationships(doc_name):
 
 def build_group(group_id):
     # Create the group that the doc is part of
-    group_url = "/api/v1/group/group/" + str(group_id)
+    group_url = '/api/v1/group/group/' + str(group_id)
     group_future = session.get(base + group_url, background_callback=get_group_info)
     group_future.result()
 
@@ -137,6 +156,27 @@ def get_group(group_id):
     else:
         build_group(group_id)
         return group_cache[group_id]
+
+# Some documents don't have "new_revision" types so the earliest possible event is used instead as the event
+def get_creation_event(rfc_num):
+    next = '/api/v1/doc/docevent/?limit=50&doc=' + doc_cache[rfc_num].draft_name
+    earliest_event = None
+
+    while next is not None:
+        events_json = rq.get(base + next).json()
+        meta_data = events_json['meta']
+        next = meta_data['next']
+        events = events_json['objects']
+
+        print(next)
+        for event in events:
+            if event['type'] == 'new_revision':
+                earliest_event = event
+
+    if earliest_event is None:
+        return events[-1]
+    else:
+        return earliest_event
 
 
 def build_doc(rfc_num):
@@ -151,45 +191,21 @@ def build_doc(rfc_num):
 
 
     # Get the date that the document was first created, published and expired
-    events_json = rq.get(base + "/api/v1/doc/docevent/?doc=" + doc_cache[rfc_num].draft_name).json()
-    events = events_json["objects"]
+    events_json = rq.get(base + '/api/v1/doc/docevent/?limit=50&doc=' + doc_cache[rfc_num].draft_name).json()
+    events = events_json['objects']
     for event in events:
-        if event["type"] == "published_rfc":
-            time_string = event["time"]
-            date = time_string.split("T")[0]
-            date_split = date.split("-")
-            time = time_string.split("T")[1]
-            time_split = time.split(":")
-
-            publish_date = datetime.datetime(year=int(date_split[0]),
-                                             month=int(date_split[1]),
-                                             day=int(date_split[2]),
-                                             hour=int(time_split[0]),
-                                             minute=int(time_split[1]),
-                                             second=int(time_split[2]))
-
+        if event['type'] == 'published_rfc':
+            publish_date = convert_string_to_datetime(event['time'])
             doc_cache[rfc_num].set_publish_date(publish_date)
 
-    creation_event = events[-1]
-
-    time_string = creation_event["time"]
-    date = time_string.split("T")[0]
-    date_split = date.split("-")
-    time = time_string.split("T")[1]
-    time_split = time.split(":")
-
-    creation_date = datetime.datetime(year=int(date_split[0]),
-                                    month=int(date_split[1]),
-                                    day=int(date_split[2]),
-                                    hour=int(time_split[0]),
-                                    minute=int(time_split[1]),
-                                    second=int(time_split[2]))
-
+    creation_event = get_creation_event(rfc_num)
+    creation_date = convert_string_to_datetime(creation_event['time'])
     doc_cache[rfc_num].set_creation_date(creation_date)
 
     # Create the group that the doc is part of
     group_url = doc_cache[rfc_num].group_url
-    group_id = int(group_url.split("/")[-2])
+    group_id = int(group_url.split('/')[-2])
+
 
     # Add the group's info to the doc's group fields
     doc_cache[rfc_num].set_group(get_group(group_id))
@@ -197,7 +213,7 @@ def build_doc(rfc_num):
 
     # Add info for the doc's area/group's parent
     parent_url = group_cache[group_id].parent_url
-    parent_id = int(parent_url.split("/")[-2])
+    parent_id = int(parent_url.split('/')[-2])
 
     doc_cache[rfc_num].set_area(get_group(parent_id))
 
@@ -209,18 +225,17 @@ def get_doc(rfc_num):
 
     else:
         build_doc(rfc_num)
-        print("BUILT", rfc_num)
         return doc_cache[rfc_num]
 
 
 def add_reference_to_graph(G, reference):
     if reference.type == 'refold':
-        G.add_edge(reference.source.id + " - " + reference.source.draft_name,
-                   reference.target.id + " - " + reference.target.draft_name,
+        G.add_edge(reference.source.id + ' - ' + reference.source.draft_name,
+                   reference.target.id + ' - ' + reference.target.draft_name,
                    relType=reference.type, color='green', style='solid')
     else:
-        G.add_edge(reference.source.id + " - " + reference.source.draft_name,
-                   reference.target.id + " - " + reference.target.draft_name,
+        G.add_edge(reference.source.id + ' - ' + reference.source.draft_name,
+                   reference.target.id + ' - ' + reference.target.draft_name,
                    relType=reference.type, color='blue', style='solid')
 
 
@@ -310,30 +325,30 @@ def unpickle_caches():
         doc_cache_file = open('docs.pickle', 'rb')
         doc_cache = pickle.load(doc_cache_file)
         doc_cache_file.close()
-        print("Loaded document cache")
+        print('Loaded document cache')
 
     except FileNotFoundError:
-        print("No document cache found!")
+        print('No document cache found!')
 
     try:
 
         reference_cache_file = open('refs.pickle', 'rb')
         reference_cache = pickle.load(reference_cache_file)
         reference_cache_file.close()
-        print("Loaded reference cache")
+        print('Loaded reference cache')
 
     except FileNotFoundError:
-        print("No reference cache found!")
+        print('No reference cache found!')
 
     try:
 
         group_cache_file = open('groups.pickle', 'rb')
         group_cache = pickle.load(group_cache_file)
         group_cache_file.close()
-        print("Loaded group cache")
+        print('Loaded group cache')
 
     except FileNotFoundError:
-        print("No group cache found!")
+        print('No group cache found!')
 
 
 def pickle_caches():
@@ -343,17 +358,17 @@ def pickle_caches():
     doc_cache_file = open('docs.pickle', 'wb')
     pickle.dump(doc_cache, doc_cache_file, protocol=-1)
     doc_cache_file.close()
-    print("Document cache written to disk!")
+    print('Document cache written to disk!')
 
     reference_cache_file = open('refs.pickle', 'wb')
     pickle.dump(reference_cache, reference_cache_file, protocol=-1)
     reference_cache_file.close()
-    print("Reference cache written to disk!")
+    print('Reference cache written to disk!')
 
     group_cache_file = open('groups.pickle', 'wb')
     pickle.dump(group_cache, group_cache_file, protocol=-1)
     group_cache_file.close()
-    print("Group cache written to disk!")
+    print('Group cache written to disk!')
 
 
 def draw_circle_graph(rfc_num):
@@ -369,14 +384,14 @@ def draw_circle_graph(rfc_num):
     y0 = 300
     count = 0
 
-    dwg = svgwrite.Drawing(filename="obs-graph.svg", debug=True)
+    dwg = svgwrite.Drawing(filename='obs-graph.svg', debug=True)
     for ref in refs:
         new_x = x0 * sin(angle_incr * count) + (x0 + buffer * 3)
         new_y = y0 * cos(angle_incr * count) + (y0 + buffer)
         id = str(ref.target.id)
 
-        print("new x: ", new_x)
-        print("new y: ", new_y)
+        print('new x: ', new_x)
+        print('new y: ', new_y)
 
         dwg.add(dwg.line(start=(new_x, new_y), end=(x0 + (buffer * 3), y0 + buffer), stroke='black', stroke_width=2))
         dwg.add(dwg.ellipse(center=(new_x, new_y), r=(radius*3, radius),
@@ -448,28 +463,30 @@ def draw_docs(areas, dwg, start_date):
             num_of_docs = len(group.documents)
             doc_height = track_height/num_of_docs
             doc_num = 1
-            print("DOC HEIGHT:", doc_height)
+            print('DOC HEIGHT:', doc_height)
 
             for doc in group.documents:
-                doc_x = (doc.document.publish_date - start_date).days\
+                doc_x = (doc.document.creation_date - start_date).days\
                         + x_buffer + track_title_length + rx + area_title_length
                 doc_y = y_offset + (doc_height * doc_num)
-                doc_length = 2 * rx
+                doc_length = (doc.document.publish_date - doc.document.creation_date).days
+                print(doc.document.title)
+                print("difference:", doc_length, "publish:", doc.document.publish_date, "creation:", doc.document.creation_date)
                 text_x = doc_x - rx
                 name_text = doc.document.title
 
-                if doc.reference_type == "refinfo":
+                if doc.reference_type == 'refinfo':
                     width = 1
-                    stroke_style = "10, 0"
-                elif doc.reference_type == "refnorm":
+                    stroke_style = '10, 0'
+                elif doc.reference_type == 'refnorm':
                     width = 4
-                    stroke_style = "10, 0"
-                elif doc.reference_type == "root":
+                    stroke_style = '10, 0'
+                elif doc.reference_type == 'root':
                     width = 10
-                    stroke_style = "10, 0"
+                    stroke_style = '10, 0'
                 else:
                     width = 4
-                    stroke_style = "10, 5"
+                    stroke_style = '10, 5'
 
                 # Draw the rectangle representing the doc
                 dwg.add(dwg.rect(
@@ -490,7 +507,7 @@ def draw_scale(dwg, start_date, end_date, num_of_groups):
     right_x = left_x + (end_date - start_date).days
     y = (track_height * num_of_groups) + y_buffer - (track_height/2)
 
-    print("right_x", right_x, "left_x", left_x, "y", y, "img height", height)
+    print('right_x', right_x, 'left_x', left_x, 'y', y, 'img height', height)
 
     # Draw x axis
     dwg.add(dwg.line(
@@ -521,15 +538,15 @@ def draw_gridlines(dwg, start_date, end_date, num_of_groups):
     timeline_y = (track_height * num_of_groups) + y_buffer - (track_height/2)
 
     next_year = datetime.datetime(year=start_date.year + 1, month=1, day=1)
-    print("NEXT YEAR:", next_year)
+    print('NEXT YEAR:', next_year)
     time_delta = next_year - start_date
-    print("DELTA:", time_delta)
+    print('DELTA:', time_delta)
 
     gridline_x = left_x + time_delta.days
 
     while (end_date - next_year) > datetime.timedelta(days=0):
 
-        print("difference:", end_date - next_year, "next year:", next_year,)
+        print('difference:', end_date - next_year, 'next year:', next_year,)
 
         # Draw grid line on tracks
         dwg.add(dwg.line(
@@ -571,7 +588,7 @@ def draw_timeline(areas, time_delta, start_date, end_date):
 
     height = (y_buffer * 2) + (num_of_groups * track_height)
 
-    dwg = svgwrite.Drawing(filename="timeline.svg", debug=False, size=(length, height))
+    dwg = svgwrite.Drawing(filename='timeline.svg', debug=False, size=(length, height))
 
     draw_areas(areas, dwg)
     draw_tracks(areas, dwg)
@@ -588,7 +605,7 @@ def get_obs_docs(rfc_num):
 
     #   WHAT IF WE HAVEN'T ADDED THE REFENCES?
     for ref in get_source_references(get_doc(rfc_num)):
-        if ref.type == "obs":
+        if ref.type == 'obs':
             timeline = timeline + get_obs_docs(ref.target.id)
 
     return timeline
@@ -599,10 +616,10 @@ def get_date(doc):
 
 
 def filter_references(references):
-    filter_lambda = (lambda x: x.type == "refold" or
-                               x.type == "refinfo" or
-                               x.type == "refnorm" or
-                               x.type == "refunk"
+    filter_lambda = (lambda x: x.type == 'refold' or
+                               x.type == 'refinfo' or
+                               x.type == 'refnorm' or
+                               x.type == 'refunk'
                      )
     return list(filter(filter_lambda, references))
 
@@ -610,14 +627,14 @@ def filter_references(references):
 def generate_timeline(rfc_num):
 
     references = get_source_references(get_doc(rfc_num))
-    references.sort(key=(lambda x: x.target.publish_date), reverse=True)
+    references.sort(key=(lambda x: x.target.expiry_date), reverse=True)
     references = filter_references(references)
 
-    end_date = references[0].source.publish_date
-    start_date = references[-1].target.publish_date
+    end_date = references[0].source.expiry_date
+    start_date = references[-1].target.creation_date
 
     time_delta = end_date - start_date
-    print("TIME RANGE:", time_delta, references[0].source.publish_date, "-", references[-1].target.publish_date)
+    print('TIME RANGE:', time_delta, references[0].source.publish_date, '-', references[-1].target.publish_date)
 
     docs = list(map(lambda x:x.target, references))
 
@@ -641,7 +658,7 @@ def generate_timeline(rfc_num):
                 areas[reference.target.area.name].groups[reference.target.group.name].add_document(new_document)
 
     root = references[0].source
-    new_document = drawing.DrawingDoc(root, "root")
+    new_document = drawing.DrawingDoc(root, 'root')
     if root.area.name not in areas.keys():
         new_area = drawing.DrawingArea(root.area.name)
         new_group = drawing.DrawingGroup(root.group.name)
