@@ -1,7 +1,4 @@
 # TODO:
-#       NOT ALL DOCS HAVE RFC NUMBERS! NEED TO CACHE BASED ON NAME!
-#       BCP and STDs do not have to consist of one doc, should be considered separate entities that are sometimes the
-#           same as an RFC
 #       CSS and HTML for styling and presentation!
 #       Arrows showing relationships
 #       Handle overlaps (bars showing timespan of some kind?)
@@ -11,8 +8,8 @@
 #           - Is expiry_date given always valid?
 #       Show future docs!
 #       Handle the big spaces at the start and end of the tracks
-#       Why does RFC 4561 give a blank track?
 #       Show drafts of the root doc
+#       Positioning is messed up again
 
 import requests as rq
 import documents as doc
