@@ -15,15 +15,12 @@
 #       Show drafts of the root doc
 
 import requests as rq
-import networkx as nx
-import matplotlib.pyplot as plt
 import documents as doc
 import drawing
 from requests_futures.sessions import FuturesSession
 import _pickle as pickle
 import svgwrite
 import datetime
-from math import pi, sin, cos
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
 
@@ -68,71 +65,22 @@ def convert_string_to_datetime(string):
                                      second=int(time_split[2]))
 
 
-def get_group_info(sess, resp):
-    json = resp.json()
+def get_doc_info(name):
+    json = rq.get(base + '/api/v1/doc/document/' + name).json()
 
-    group_id = json['id']
+    update_doc = doc_cache[name]
+    update_doc.set_draft_name(json['name'])
+    update_doc.set_title(json['title'])
+    update_doc.set_abstract(json['abstract'])
+    update_doc.set_group_url(json['group'])
+    update_doc.set_rfc_num(json['rfc'])
 
-    new_group = doc.Group(group_id)
-    new_group.set_name(json['name'])
-    new_group.set_parent_url(json['parent'])
-
-    group_cache[group_id] = new_group
-
-
-def get_doc_info(sess, resp):
-    json = resp.json()
-
-    if json['rfc'] is None:
-        doc_id = json['name']
-
-    else:
-        doc_id = 'RFC' + json['rfc']
-
-    updated_doc = doc_cache[doc_id]
-    updated_doc.set_draft_name(json['name'])
-    updated_doc.set_title(json['title'])
-    updated_doc.set_abstract(json['abstract'])
-    updated_doc.set_group_url(json['group'])
     if json['expires'] == None:
-        updated_doc.set_expiry_date(datetime.datetime.today())
+        today = datetime.datetime.today()
+        update_doc.set_expiry_date(today)
     else:
-        updated_doc.set_expiry_date(convert_string_to_datetime(json['expires']))
-
-
-def resolve_doc_url(sess, resp):
-    json = resp.json()
-    doc_id = json['name'].upper()
-    doc_url = json['document']
-
-    # Sometimes a doc will be referred to in alternate ways such as BCP14 instead of RFC2119 so a link between the two
-    #   is made for convenience
-    if doc_id[0:3] != 'RFC':
-        request = rq.get(base + doc_url)
-        rfc_num = request.json()['rfc']
-        print('DOC ID', doc_id, 'rfc_num', rfc_num, rfc_num is None)
-
-        if rfc_num is None:
-            new_doc = doc.RFC(doc_id)
-            new_doc.set_draft_url(doc_url)
-
-            doc_cache[new_doc.id] = new_doc
-        else:
-            alt_doc_id = doc_id
-            print(alt_doc_id)
-            new_doc_id = 'RFC' + rfc_num
-            new_doc = doc.RFC(new_doc_id)
-            new_doc.set_draft_url(doc_url)
-
-            doc_cache[new_doc.id] = new_doc
-            doc_cache[alt_doc_id] = doc_cache[new_doc_id]
-            print('Link made between:', new_doc_id, alt_doc_id)
-
-    else:
-        new_doc = doc.RFC(doc_id)
-        new_doc.set_draft_url(doc_url)
-
-        doc_cache[new_doc.id] = new_doc
+        expiry_datetime = convert_string_to_datetime(json['expires'])
+        update_doc.set_expiry_date(expiry_datetime)
 
 
 def get_relationships(doc_name):
@@ -143,10 +91,14 @@ def get_relationships(doc_name):
 
 
 def build_group(group_id):
-    # Create the group that the doc is part of
-    group_url = '/api/v1/group/group/' + str(group_id)
-    group_future = session.get(base + group_url, background_callback=get_group_info)
-    group_future.result()
+    json = rq.get(base + '/api/v1/group/group/' + str(group_id)).json()
+
+    group_id = json['id']
+    new_group = doc.Group(group_id)
+    new_group.set_name(json['name'])
+    new_group.set_parent_url(json['parent'])
+
+    group_cache[group_id] = new_group
 
 
 def get_group(group_id):
@@ -157,9 +109,21 @@ def get_group(group_id):
         build_group(group_id)
         return group_cache[group_id]
 
+
+def get_publish_event(name):
+    events_json = rq.get(base + '/api/v1/doc/docevent/?limit=50&doc=' + doc_cache[name].draft_name).json()
+    events = events_json['objects']
+
+    for event in events:
+        if event['type'] == 'published_rfc':
+            return event
+
+    return None
+
+
 # Some documents don't have "new_revision" types so the earliest possible event is used instead as the event
-def get_creation_event(rfc_num):
-    next = '/api/v1/doc/docevent/?limit=50&doc=' + doc_cache[rfc_num].draft_name
+def get_creation_event(name):
+    next = '/api/v1/doc/docevent/?limit=50&doc=' + doc_cache[name].draft_name
     earliest_event = None
 
     while next is not None:
@@ -168,7 +132,6 @@ def get_creation_event(rfc_num):
         next = meta_data['next']
         events = events_json['objects']
 
-        print(next)
         for event in events:
             if event['type'] == 'new_revision':
                 earliest_event = event
@@ -179,69 +142,71 @@ def get_creation_event(rfc_num):
         return earliest_event
 
 
-def build_doc(rfc_num):
-    # Resolve RFC number into URL that can be used to find out more info about the RFC
-    url_future = session.get(base + '/api/v1/doc/docalias/' + rfc_num, background_callback=resolve_doc_url)
-    url_future.result()
+def build_doc_draft_name(name, alt_name=None):
+    doc_cache[name] = doc.RFC(name)
+    get_doc_info(name)
 
-    # Get the info for the doc now that we have a URL to query
-    doc_url = doc_cache[rfc_num].draft_url
-    doc_future = session.get(base + doc_url, background_callback=get_doc_info)
-    doc_future.result()
+    publish_event = get_publish_event(name)
 
+    if publish_event is not None:
+        publish_date = convert_string_to_datetime(publish_event['time'])
+        doc_cache[name].set_publish_date(publish_date)
 
-    # Get the date that the document was first created, published and expired
-    events_json = rq.get(base + '/api/v1/doc/docevent/?limit=50&doc=' + doc_cache[rfc_num].draft_name).json()
-    events = events_json['objects']
-    for event in events:
-        if event['type'] == 'published_rfc':
-            publish_date = convert_string_to_datetime(event['time'])
-            doc_cache[rfc_num].set_publish_date(publish_date)
-
-    creation_event = get_creation_event(rfc_num)
+    creation_event = get_creation_event(name)
     creation_date = convert_string_to_datetime(creation_event['time'])
-    doc_cache[rfc_num].set_creation_date(creation_date)
+    doc_cache[name].set_creation_date(creation_date)
 
     # Create the group that the doc is part of
-    group_url = doc_cache[rfc_num].group_url
+    group_url = doc_cache[name].group_url
     group_id = int(group_url.split('/')[-2])
 
 
     # Add the group's info to the doc's group fields
-    doc_cache[rfc_num].set_group(get_group(group_id))
-    doc_cache[rfc_num].set_area_url(group_cache[group_id].parent_url)
+    doc_cache[name].set_group(get_group(group_id))
+    doc_cache[name].set_area_url(group_cache[group_id].parent_url)
 
     # Add info for the doc's area/group's parent
     parent_url = group_cache[group_id].parent_url
     parent_id = int(parent_url.split('/')[-2])
 
-    doc_cache[rfc_num].set_area(get_group(parent_id))
+    doc_cache[name].set_area(get_group(parent_id))
+
+    if alt_name is not None:
+        doc_cache[alt_name] = doc_cache[name]
 
 
-def get_doc(rfc_num):
+def get_doc_alias(name):
+    json = rq.get(base + '/api/v1/doc/docalias/' + name).json()
+    doc_url = json['document']
+    doc_alias = doc_url.split('/')[-2]
 
-    if rfc_num in doc_cache.keys():
-        return doc_cache[rfc_num]
+    return doc_alias
+
+
+def get_doc(name):
+
+    if name in doc_cache.keys():
+        return doc_cache[name]
 
     else:
-        build_doc(rfc_num)
-        return doc_cache[rfc_num]
+        alias = get_doc_alias(name)
+
+        if alias in doc_cache.keys():
+            doc_cache[name] = doc_cache[alias]
+        else:
+            build_doc_draft_name(alias, alt_name=name)
+
+        return doc_cache[name]
 
 
-def add_reference_to_graph(G, reference):
-    if reference.type == 'refold':
-        G.add_edge(reference.source.id + ' - ' + reference.source.draft_name,
-                   reference.target.id + ' - ' + reference.target.draft_name,
-                   relType=reference.type, color='green', style='solid')
-    else:
-        G.add_edge(reference.source.id + ' - ' + reference.source.draft_name,
-                   reference.target.id + ' - ' + reference.target.draft_name,
-                   relType=reference.type, color='blue', style='solid')
+def build_reference(reference, target_doc_name):
+    get_doc(target_doc_name)
+    reference.set_target(doc_cache[target_doc_name])
+
+    return reference
 
 
-# Wrap calls to build_doc in future for asynchronous
 def get_source_references(root):
-    incomplete_references = []
     executor = ThreadPoolExecutor(max_workers=500)
     futures = []
     references = []
@@ -253,66 +218,18 @@ def get_source_references(root):
         new_reference.set_source(root)
 
         type_split = relationship.get('relationship').split('/')
-        new_reference.set_type(type_split[-2])
+        type = type_split[-2]
+        new_reference.set_type(type)
 
         target_split = relationship.get('target').split('/')
-        target_doc_id = target_split[-2].upper()
+        target_doc_name = target_split[-2].upper()
 
-        incomplete_references.append((new_reference, target_doc_id))
-        futures.append(executor.submit(get_doc, target_doc_id))
+        futures.append(executor.submit(build_reference, new_reference, target_doc_name))
 
-    # Now wait for all of async requests to complete, which should roughly be at the same time
     for future in as_completed(futures):
-        future.result()
-
-    for reference in incomplete_references:
-        target_doc_id = reference[1]
-        reference[0].set_target(doc_cache[target_doc_id])
-        references.append(reference[0])
+        references.append(future.result())
 
     return references
-
-
-def find_related_docs(G, root, level):
-
-    if level == 0:
-        return
-
-    if root.id not in reference_cache.keys():
-        references = get_source_references(root)
-
-    else:
-        references = reference_cache[root.id]
-
-    if len(references) == 0:
-        reference_cache[root.id] = []
-
-    else:
-        for reference in references:
-            if root.id not in reference_cache.keys():
-                reference_cache[root.id] = [reference]
-
-            elif reference not in reference_cache[root.id]:
-                reference_cache[root.id].append(reference)
-
-            add_reference_to_graph(G, reference)
-            find_related_docs(G, reference.target, level - 1)
-
-
-def draw_graph(G):
-    labels = {}
-
-    for node in G.nodes:
-        labels[node] = node
-
-    # pos = nx.spring_layout(G, k=0.2, iterations=20)
-    pos = nx.shell_layout(G)
-    # pos = nx.circular_layout(G)
-    nx.draw_networkx_edges(G, pos, G.edges(), width=2, alpha=0.5, edge_color=nx.get_edge_attributes(G,'color').values())
-    nx.draw_networkx_labels(G, pos, labels, node_size=50)
-    plt.savefig('graph.png')
-    plt.axis('off')
-    plt.show()
 
 
 def unpickle_caches():
@@ -370,39 +287,6 @@ def pickle_caches():
     group_cache_file.close()
     print('Group cache written to disk!')
 
-
-def draw_circle_graph(rfc_num):
-    og = nx.MultiDiGraph()
-    obs_refs = []
-
-    refs = reference_cache[rfc_num]
-    num_of_refs = len(refs)
-    angle_incr = pi*(2/num_of_refs)
-    radius = 30
-    buffer = radius * 1.1
-    x0 = 300
-    y0 = 300
-    count = 0
-
-    dwg = svgwrite.Drawing(filename='obs-graph.svg', debug=True)
-    for ref in refs:
-        new_x = x0 * sin(angle_incr * count) + (x0 + buffer * 3)
-        new_y = y0 * cos(angle_incr * count) + (y0 + buffer)
-        id = str(ref.target.id)
-
-        print('new x: ', new_x)
-        print('new y: ', new_y)
-
-        dwg.add(dwg.line(start=(new_x, new_y), end=(x0 + (buffer * 3), y0 + buffer), stroke='black', stroke_width=2))
-        dwg.add(dwg.ellipse(center=(new_x, new_y), r=(radius*3, radius),
-                            fill='#7777ff', stroke='black', stroke_width=1))
-        dwg.add(dwg.text(text=id, insert=(new_x - (radius * 3/4), new_y)))
-
-        count = count + 1
-
-    dwg.add(dwg.ellipse(center=(x0 + (buffer * 3), y0 + buffer), r=(radius*3, radius),
-                       fill='blue', stroke='black', stroke_width=1))
-    dwg.save()
 
 def draw_areas(areas, dwg):
     y_offset = 0 + y_buffer
@@ -463,15 +347,12 @@ def draw_docs(areas, dwg, start_date):
             num_of_docs = len(group.documents)
             doc_height = track_height/num_of_docs
             doc_num = 1
-            print('DOC HEIGHT:', doc_height)
 
             for doc in group.documents:
                 doc_x = (doc.document.creation_date - start_date).days\
                         + x_buffer + track_title_length + rx + area_title_length
                 doc_y = y_offset + (doc_height * doc_num)
                 doc_length = (doc.document.publish_date - doc.document.creation_date).days
-                print(doc.document.title)
-                print("difference:", doc_length, "publish:", doc.document.publish_date, "creation:", doc.document.creation_date)
                 text_x = doc_x - rx
                 name_text = doc.document.title
 
@@ -507,8 +388,6 @@ def draw_scale(dwg, start_date, end_date, num_of_groups):
     right_x = left_x + (end_date - start_date).days
     y = (track_height * num_of_groups) + y_buffer - (track_height/2)
 
-    print('right_x', right_x, 'left_x', left_x, 'y', y, 'img height', height)
-
     # Draw x axis
     dwg.add(dwg.line(
             start=(left_x, y), end=(right_x, y), stroke='#000000', stroke_width=2
@@ -538,16 +417,11 @@ def draw_gridlines(dwg, start_date, end_date, num_of_groups):
     timeline_y = (track_height * num_of_groups) + y_buffer - (track_height/2)
 
     next_year = datetime.datetime(year=start_date.year + 1, month=1, day=1)
-    print('NEXT YEAR:', next_year)
     time_delta = next_year - start_date
-    print('DELTA:', time_delta)
 
     gridline_x = left_x + time_delta.days
 
     while (end_date - next_year) > datetime.timedelta(days=0):
-
-        print('difference:', end_date - next_year, 'next year:', next_year,)
-
         # Draw grid line on tracks
         dwg.add(dwg.line(
             start=(gridline_x, track_bottom_y), end=(gridline_x, y_buffer), stroke='#111111', stroke_width=2, stroke_opacity='0.3'
@@ -564,7 +438,6 @@ def draw_gridlines(dwg, start_date, end_date, num_of_groups):
         last_year = next_year
         next_year = datetime.datetime(year=next_year.year + 1, month=1, day=1)
         gridline_x = gridline_x + (next_year - last_year).days
-
 
 
 def draw_timeline(areas, time_delta, start_date, end_date):
@@ -599,18 +472,6 @@ def draw_timeline(areas, time_delta, start_date, end_date):
     dwg.save()
 
 
-def get_obs_docs(rfc_num):
-
-    timeline = [doc_cache[rfc_num]]
-
-    #   WHAT IF WE HAVEN'T ADDED THE REFENCES?
-    for ref in get_source_references(get_doc(rfc_num)):
-        if ref.type == 'obs':
-            timeline = timeline + get_obs_docs(ref.target.id)
-
-    return timeline
-
-
 def get_date(doc):
     return doc.publish_date
 
@@ -626,7 +487,15 @@ def filter_references(references):
 
 def generate_timeline(rfc_num):
 
-    references = get_source_references(get_doc(rfc_num))
+    root = get_doc(rfc_num)
+
+    print("root", root.id)
+
+    references = get_source_references(root)
+
+    for reference in references:
+        print("id:", reference.target.id, "expiry:", reference.target.expiry_date)
+
     references.sort(key=(lambda x: x.target.expiry_date), reverse=True)
     references = filter_references(references)
 
@@ -634,7 +503,6 @@ def generate_timeline(rfc_num):
     start_date = references[-1].target.creation_date
 
     time_delta = end_date - start_date
-    print('TIME RANGE:', time_delta, references[0].source.publish_date, '-', references[-1].target.publish_date)
 
     docs = list(map(lambda x:x.target, references))
 
@@ -679,27 +547,11 @@ def generate_timeline(rfc_num):
 
 
 def main():
-    G = nx.MultiDiGraph()
-
-
-    rfc_num = 'RFC' + input('Enter the requested RFC number: ')
-
-    # deg_of_separation = input('Enter the degree of separation: ')
-
+    rfc_num = 'rfc' + input('Enter the requested RFC number: ')
     root_doc = get_doc(rfc_num)
-
-    # G.add_node(root_doc)
     doc_cache[root_doc.id] = root_doc
 
-    # find_related_docs(G, root_doc, int(deg_of_separation))
-
-    # print('Drawing graph...')
-    # draw_graph(G)
-    # nx.drawing.nx_pydot.write_dot(G, 'graph.dot')
-
     generate_timeline(rfc_num)
-
-    # draw_circle_graph(rfc_num)
 
 unpickle_caches()
 main()

@@ -20,6 +20,8 @@ class Reference:
         self.id = -1
         self.source = ""
         self.target = ""
+        self.source_name = ""
+        self.target_name = ""
         self.type = -1
         self.group = ""
 
@@ -35,12 +37,18 @@ class Reference:
     def set_group(self, group):
         self.group = group
 
+    def set_source_name(self, name):
+        self.source_name = name
+
+    def set_target_name(self, name):
+        self.target_name = name
 
 class RFC:
     def __init__(self, id):
         self.id = id
         self.draft_name = ""
         self.draft_url = ""
+        self.rfc_num = ""
         self.group = -1
         self.group_url = ""
         self.url = ""
@@ -57,6 +65,9 @@ class RFC:
 
     def set_draft_url(self, url):
         self.draft_url = url
+
+    def set_rfc_num(self, rfc):
+        self.rfc_num = rfc
 
     def set_group(self, working_group):
         self.group = working_group
