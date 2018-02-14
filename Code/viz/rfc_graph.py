@@ -9,11 +9,11 @@
 #       Show future docs!
 #       Handle the big spaces at the start and end of the tracks
 #       Show drafts of the root doc
-#       Positioning is messed up again
 
 import requests as rq
 import documents as doc
 import drawing
+from drawing import rx, ry, x_buffer, y_buffer, track_height, track_title_length, area_title_length, length, height, date_y_offset, date_x_offset, doc_height, colours, track_colours, scale_y_offset
 from requests_futures.sessions import FuturesSession
 import _pickle as pickle
 import svgwrite
@@ -33,19 +33,6 @@ reference_cache = {}
 # A dictionary of groups indexed on their id (such as group_cache[1027])
 group_cache = {}
 session = FuturesSession(max_workers=50)
-
-
-rx = 150
-ry = 50
-x_buffer = rx + 20
-y_buffer = ry + 20
-track_height = 150
-track_title_length = 50
-area_title_length = 150
-length = 1000
-height = 1000
-date_y_offset = 35
-date_x_offset = 70
 
 
 def convert_string_to_datetime(string):
@@ -291,11 +278,10 @@ def draw_areas(areas, dwg):
 
     for area in areas.values():
         track_colour = drawing.track_colours[area_count]
-        area_height = len(area.groups.values()) * track_height
-        y_title = y_offset + (area_height / 2)
+        y_title = y_offset + (area.height / 2)
 
         dwg.add(dwg.rect(
-            insert=(x_buffer, y_offset), size=(area_title_length, area_height),
+            insert=(x_buffer, y_offset), size=(area_title_length, area.height),
             fill=track_colour, stroke='#000000'))
 
         dwg.add(dwg.text(
@@ -305,10 +291,10 @@ def draw_areas(areas, dwg):
         ))
 
         area_count = area_count + 1
-        y_offset = y_offset + area_height
+        y_offset = y_offset + area.height
 
 
-def draw_tracks(areas, dwg):
+def draw_tracks(areas, dwg, length):
     y_offset = 0 + y_buffer
     area_count = 0
     x = x_buffer + area_title_length
@@ -320,38 +306,40 @@ def draw_tracks(areas, dwg):
             y_title = y_offset + 20
 
             dwg.add(dwg.rect(
-                insert=(x,y_offset), size=(track_length, track_height), fill=track_colour, stroke='#000000'))
+                insert=(x,y_offset), size=(track_length, group.height), fill=track_colour, stroke='#000000'))
 
             dwg.add(dwg.text(
                 text=group.name, insert=(x + 10, y_title),
-                textLength=[track_height], lengthAdjust='spacing'
-            ))
+                textLength=[track_height], lengthAdjust='spacing'))
 
-            y_offset = y_offset + track_height
+            y_offset = y_offset + group.height
 
         area_count = area_count + 1
 
 
-def draw_docs(areas, dwg, start_date):
+def draw_docs(areas, dwg, start_date, timeline_length):
     area_count = 0
     y_offset = 0 + y_buffer
+    doc_line_x = x_buffer + track_title_length + rx + area_title_length
 
     for area in areas.values():
         colour = drawing.colours[area_count]
 
         for group in area.groups.values():
-
             num_of_docs = len(group.documents)
-            doc_height = track_height/num_of_docs
             doc_num = 1
 
             for doc in group.documents:
                 doc_x = (doc.document.creation_date - start_date).days\
                         + x_buffer + track_title_length + rx + area_title_length
                 doc_y = y_offset + (doc_height * doc_num)
-                doc_length = (doc.document.publish_date - doc.document.creation_date).days
-                text_x = doc_x - rx
+                text_x = doc_x
                 name_text = doc.document.title
+
+                if (doc.document.publish_date - doc.document.creation_date).days < 150:
+                    doc_length = 150
+                else:
+                    doc_length = (doc.document.publish_date - doc.document.creation_date).days
 
                 if doc.reference_type == 'refinfo':
                     width = 1
@@ -368,22 +356,26 @@ def draw_docs(areas, dwg, start_date):
 
                 # Draw the rectangle representing the doc
                 dwg.add(dwg.rect(
-                    insert=(doc_x-rx, doc_y - doc_height), size=(doc_length, doc_height),fill=colour,
+                    insert=(doc_x, doc_y - doc_height), size=(doc_length, doc_height),fill=colour,
                     stroke='#000000', stroke_width=width, stroke_dasharray= stroke_style))
                 # Draw the name of the doc
                 dwg.add(dwg.text(
                     text=name_text, insert=(text_x, doc_y - doc_height/2), textLength=str(doc_length), lengthAdjust='spacingAndGlyphs'
                 ))
 
+                dwg.add(dwg.line(
+                    start=(doc_line_x, doc_y), end=(doc_line_x + timeline_length, doc_y), stroke='#777777', stroke_width=1
+                ))
+
                 doc_num = doc_num + 1
-            y_offset = y_offset + track_height
+            y_offset = y_offset + group.height
         area_count = area_count + 1
 
 
-def draw_scale(dwg, start_date, end_date, num_of_groups):
+def draw_scale(dwg, start_date, end_date, areas_height):
     left_x = x_buffer + track_title_length + rx + area_title_length
     right_x = left_x + (end_date - start_date).days
-    y = (track_height * num_of_groups) + y_buffer - (track_height/2)
+    y = areas_height + y_buffer + scale_y_offset
 
     # Draw x axis
     dwg.add(dwg.line(
@@ -407,11 +399,11 @@ def draw_scale(dwg, start_date, end_date, num_of_groups):
     ))
 
 
-def draw_gridlines(dwg, start_date, end_date, num_of_groups):
+def draw_axis_gridlines(dwg, start_date, end_date, areas_height):
     left_x = x_buffer + track_title_length + rx + area_title_length
     right_x = left_x + (end_date - start_date).days
-    track_bottom_y = (track_height * (num_of_groups - 1)) + y_buffer
-    timeline_y = (track_height * num_of_groups) + y_buffer - (track_height/2)
+    track_bottom_y = areas_height + y_buffer
+    timeline_y = areas_height + y_buffer + scale_y_offset
 
     next_year = datetime.datetime(year=start_date.year + 1, month=1, day=1)
     time_delta = next_year - start_date
@@ -438,33 +430,21 @@ def draw_gridlines(dwg, start_date, end_date, num_of_groups):
 
 
 def draw_timeline(areas, time_delta, start_date, end_date):
-
-    global rx
-    global ry
-    global track_height
-    global x_buffer
-    global y_buffer
-    global track_title_length
-    global length
-    global height
-
-    # Define constants for size of ellipses and edges
-    length = time_delta.days + (2 * x_buffer) + (2 * rx) + track_title_length + area_title_length
-
-    num_of_groups = 1
+    img_length = time_delta.days + (2 * x_buffer) + (2 * rx) + track_title_length + area_title_length
+    total_areas_height = 0
 
     for area in areas.values():
-        num_of_groups = num_of_groups + len(area.groups.values())
+        total_areas_height = total_areas_height + area.height
 
-    height = (y_buffer * 2) + (num_of_groups * track_height)
+    img_height = (y_buffer * 2) + total_areas_height + scale_y_offset
 
-    dwg = svgwrite.Drawing(filename='timeline.svg', debug=False, size=(length, height))
+    dwg = svgwrite.Drawing(filename='timeline.svg', debug=False, size=(img_length, img_height))
 
     draw_areas(areas, dwg)
-    draw_tracks(areas, dwg)
-    draw_scale(dwg, start_date, end_date, num_of_groups)
-    draw_gridlines(dwg, start_date, end_date, num_of_groups)
-    draw_docs(areas, dwg, start_date)
+    draw_tracks(areas, dwg, img_length)
+    draw_scale(dwg, start_date, end_date, total_areas_height)
+    draw_axis_gridlines(dwg, start_date, end_date, total_areas_height)
+    draw_docs(areas, dwg, start_date, time_delta.days)
 
     dwg.save()
 
@@ -539,6 +519,10 @@ def generate_timeline(rfc_num):
         else:
             areas[root.area.name].groups[root.group.name].add_document(new_document)
 
+    for area in areas.values():
+        for group in area.groups.values():
+            group.adjust_height()
+        area.adjust_height()
 
     draw_timeline(areas, time_delta, start_date, end_date)
 
