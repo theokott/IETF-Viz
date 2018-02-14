@@ -43,7 +43,7 @@ class Reference:
     def set_target_name(self, name):
         self.target_name = name
 
-class RFC:
+class Document:
     def __init__(self, id):
         self.id = id
         self.draft_name = ""
@@ -59,6 +59,7 @@ class RFC:
         self.creation_date = None
         self.expiry_date = None
         self.publish_date = None
+        self.revision_dates = []
 
     def set_draft_name(self, name):
         self.draft_name = name
@@ -95,3 +96,6 @@ class RFC:
 
     def set_publish_date(self, date):
         self.publish_date = date
+
+    def add_revision(self, revision):
+        self.revision_dates.append(revision)

@@ -1,20 +1,16 @@
 # TODO:
 #       CSS and HTML for styling and presentation!
 #       Arrows showing relationships
-#       Handle overlaps (bars showing timespan of some kind?)
-#           - Doc first created to expiring with date published shown?
-#           - First docevent to published to last?
-#           - Need to iterate through the events because there could be more than 20, increase this to reduce calls?
-#           - Is expiry_date given always valid?
 #       Show future docs!
 #       Handle the big spaces at the start and end of the tracks
 #       Show drafts of the root doc
+#       Make less calls for events! Do it once.
 
 import requests as rq
-import documents as doc
+import documents as docs
 import drawing
-from drawing import rx, ry, x_buffer, y_buffer, track_height, track_title_length, area_title_length, length, height, date_y_offset, date_x_offset, doc_height, colours, track_colours, scale_y_offset
-from requests_futures.sessions import FuturesSession
+from drawing import (rx, ry, x_buffer, y_buffer, track_height, track_title_length, area_title_length, date_y_offset,
+                     date_x_offset, doc_height, colours, track_colours, scale_y_offset)
 import _pickle as pickle
 import svgwrite
 import datetime
@@ -32,7 +28,6 @@ reference_cache = {}
 
 # A dictionary of groups indexed on their id (such as group_cache[1027])
 group_cache = {}
-session = FuturesSession(max_workers=50)
 
 
 def convert_string_to_datetime(string):
@@ -42,11 +37,11 @@ def convert_string_to_datetime(string):
     time_split = time.split(':')
 
     return datetime.datetime(year=int(date_split[0]),
-                                     month=int(date_split[1]),
-                                     day=int(date_split[2]),
-                                     hour=int(time_split[0]),
-                                     minute=int(time_split[1]),
-                                     second=int(time_split[2]))
+                             month=int(date_split[1]),
+                             day=int(date_split[2]),
+                             hour=int(time_split[0]),
+                             minute=int(time_split[1]),
+                             second=int(time_split[2]))
 
 
 def get_doc_info(name):
@@ -68,8 +63,18 @@ def get_doc_info(name):
 
 
 def get_relationships(doc_name):
-    resp = rq.get(base + '/api/v1/doc/relateddocument/?source=' + doc_name)
-    relationships = resp.json().get('objects')
+    relationships = []
+    next = '/api/v1/doc/docevent/?limit=50&source=' + doc_name
+
+    while next is not None:
+        resp = rq.get(base + '/api/v1/doc/relateddocument/?limit=50&source=' + doc_name)
+        json = resp.json()
+        meta_data = json['meta']
+        next = meta_data['next']
+
+        relationships = relationships + resp.json().get('objects')
+
+
 
     return relationships
 
@@ -78,7 +83,7 @@ def build_group(group_id):
     json = rq.get(base + '/api/v1/group/group/' + str(group_id)).json()
 
     group_id = json['id']
-    new_group = doc.Group(group_id)
+    new_group = docs.Group(group_id)
     new_group.set_name(json['name'])
     new_group.set_parent_url(json['parent'])
 
@@ -105,8 +110,25 @@ def get_publish_event(name):
     return None
 
 
+def get_revision_events(name):
+    next = '/api/v1/doc/docevent/?limit=50&doc=' + doc_cache[name].draft_name
+    revisions = []
+
+    while next is not None:
+        events_json = rq.get(base + next).json()
+        meta_data = events_json['meta']
+        next = meta_data['next']
+        events = events_json['objects']
+
+        for event in events:
+            if event['type'] == 'new_revision':
+                revisions.append(event)
+
+    return revisions
+
+
 # Some documents don't have "new_revision" types so the earliest possible event is used instead as the event
-def get_creation_event(name):
+def get_earliest_event(name):
     next = '/api/v1/doc/docevent/?limit=50&doc=' + doc_cache[name].draft_name
     earliest_event = None
 
@@ -127,7 +149,7 @@ def get_creation_event(name):
 
 
 def build_doc_draft_name(name, alt_name=None):
-    doc_cache[name] = doc.RFC(name)
+    doc_cache[name] = docs.Document(name)
     get_doc_info(name)
 
     publish_event = get_publish_event(name)
@@ -136,7 +158,11 @@ def build_doc_draft_name(name, alt_name=None):
         publish_date = convert_string_to_datetime(publish_event['time'])
         doc_cache[name].set_publish_date(publish_date)
 
-    creation_event = get_creation_event(name)
+    for revision in get_revision_events(name):
+        revision_datetime = convert_string_to_datetime(revision['time'])
+        doc_cache[name].add_revision(revision_datetime)
+
+    creation_event = get_earliest_event(name)
     creation_date = convert_string_to_datetime(creation_event['time'])
     doc_cache[name].set_creation_date(creation_date)
 
@@ -197,8 +223,10 @@ def get_source_references(root):
 
     relationships = get_relationships(root.draft_name)
 
+    print(relationships)
+
     for relationship in relationships:
-        new_reference = doc.Reference()
+        new_reference = docs.Reference()
         new_reference.set_source(root)
 
         type_split = relationship.get('relationship').split('/')
@@ -312,6 +340,12 @@ def draw_tracks(areas, dwg, length):
                 text=group.name, insert=(x + 10, y_title),
                 textLength=[track_height], lengthAdjust='spacing'))
 
+            dwg.add(dwg.line(
+                start=(x + rx + track_title_length, y_offset),
+                end=(x + rx + track_title_length, y_offset + group.height),
+                stroke='#000000', stroke_width=2
+            ))
+
             y_offset = y_offset + group.height
 
         area_count = area_count + 1
@@ -326,7 +360,6 @@ def draw_docs(areas, dwg, start_date, timeline_length):
         colour = drawing.colours[area_count]
 
         for group in area.groups.values():
-            num_of_docs = len(group.documents)
             doc_num = 1
 
             for doc in group.documents:
@@ -335,6 +368,7 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                 doc_y = y_offset + (doc_height * doc_num)
                 text_x = doc_x
                 name_text = doc.document.title
+                revision_y = doc_y + doc_height/2
 
                 if (doc.document.publish_date - doc.document.creation_date).days < 150:
                     doc_length = 150
@@ -358,14 +392,24 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                 dwg.add(dwg.rect(
                     insert=(doc_x, doc_y - doc_height), size=(doc_length, doc_height),fill=colour,
                     stroke='#000000', stroke_width=width, stroke_dasharray= stroke_style))
+
                 # Draw the name of the doc
                 dwg.add(dwg.text(
-                    text=name_text, insert=(text_x, doc_y - doc_height/2), textLength=str(doc_length), lengthAdjust='spacingAndGlyphs'
+                    text=name_text, insert=(text_x, doc_y - doc_height/2), textLength=str(doc_length),
+                    lengthAdjust='spacingAndGlyphs'
                 ))
 
                 dwg.add(dwg.line(
-                    start=(doc_line_x, doc_y), end=(doc_line_x + timeline_length, doc_y), stroke='#777777', stroke_width=1
+                    start=(doc_line_x, doc_y), end=(doc_line_x + timeline_length, doc_y), stroke='#111111',
+                    stroke_width=1, stroke_opacity='0.3'
                 ))
+
+                for revision in doc.document.revision_dates:
+                    revision_x = (revision - start_date).days + x_buffer + track_title_length + rx + area_title_length
+                    print("REVISION", revision, revision_x, revision_y)
+                    dwg.add(dwg.circle(
+                        centre=(revision_x, revision_y), r=10, fill='#ffffff'
+                    ))
 
                 doc_num = doc_num + 1
             y_offset = y_offset + group.height
@@ -480,8 +524,6 @@ def generate_timeline(rfc_num):
     start_date = references[-1].target.creation_date
 
     time_delta = end_date - start_date
-
-    docs = list(map(lambda x:x.target, references))
 
     areas = {}
 
