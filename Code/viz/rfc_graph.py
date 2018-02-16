@@ -5,6 +5,8 @@
 #       Handle the big spaces at the start and end of the tracks
 #       Show drafts of the root doc
 #       Make less calls for events! Do it once.
+#       Duplicate docs need to be checked and removed (RFC 8008)
+#       Positioning is messed up (RFC 4561)
 
 import requests as rq
 import documents as docs
@@ -14,6 +16,7 @@ from drawing import (rx, ry, x_buffer, y_buffer, track_height, track_title_lengt
 import _pickle as pickle
 import svgwrite
 import datetime
+import os
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
 
@@ -326,7 +329,7 @@ def draw_tracks(areas, dwg, length):
     y_offset = 0 + y_buffer
     area_count = 0
     x = x_buffer + area_title_length
-    track_length = length - track_title_length - area_title_length - (2 * x_buffer) + rx
+    track_length = length + track_title_length
 
     for area in areas.values():
         track_colour = drawing.track_colours[area_count]
@@ -341,8 +344,8 @@ def draw_tracks(areas, dwg, length):
                 textLength=[track_height], lengthAdjust='spacing'))
 
             dwg.add(dwg.line(
-                start=(x + rx + track_title_length, y_offset),
-                end=(x + rx + track_title_length, y_offset + group.height),
+                start=(x + track_title_length, y_offset),
+                end=(x + track_title_length, y_offset + group.height),
                 stroke='#000000', stroke_width=2
             ))
 
@@ -354,7 +357,7 @@ def draw_tracks(areas, dwg, length):
 def draw_docs(areas, dwg, start_date, timeline_length):
     area_count = 0
     y_offset = 0 + y_buffer
-    doc_line_x = x_buffer + track_title_length + rx + area_title_length
+    doc_line_x = x_buffer + track_title_length + area_title_length
 
     for area in areas.values():
         colour = drawing.colours[area_count]
@@ -364,11 +367,9 @@ def draw_docs(areas, dwg, start_date, timeline_length):
 
             for doc in group.documents:
                 doc_x = (doc.document.creation_date - start_date).days\
-                        + x_buffer + track_title_length + rx + area_title_length
+                        + x_buffer + track_title_length + area_title_length
                 doc_y = y_offset + (doc_height * doc_num)
-                text_x = doc_x
                 name_text = doc.document.title
-                revision_y = doc_y + doc_height/2
 
                 if (doc.document.publish_date - doc.document.creation_date).days < 150:
                     doc_length = 150
@@ -391,25 +392,31 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                 # Draw the rectangle representing the doc
                 dwg.add(dwg.rect(
                     insert=(doc_x, doc_y - doc_height), size=(doc_length, doc_height),fill=colour,
-                    stroke='#000000', stroke_width=width, stroke_dasharray= stroke_style))
+                    stroke='#000000', stroke_width=width, stroke_dasharray=stroke_style))
+
+                print("DOC LENGTH:", doc_length, "LAST X:", doc_x + doc_length, "TRACK LAST X:", x_buffer + track_title_length + area_title_length + timeline_length)
+
+
+                # Draw vertical lines in bars to indicate new revisions of the document
+                for revision in doc.document.revision_dates:
+                    revision_x = (revision - start_date).days + x_buffer + track_title_length + area_title_length
+
+                    dwg.add(dwg.line(
+                        start=(revision_x, doc_y), end=(revision_x, doc_y - doc_height),
+                        stroke='#000000', stroke_width=1, stroke_opacity='0.67'
+                    ))
 
                 # Draw the name of the doc
                 dwg.add(dwg.text(
-                    text=name_text, insert=(text_x, doc_y - doc_height/2), textLength=str(doc_length),
+                    text=name_text, insert=(doc_x, doc_y - doc_height/2), textLength=str(doc_length),
                     lengthAdjust='spacingAndGlyphs'
                 ))
 
+                # Draw horizontal gridline
                 dwg.add(dwg.line(
                     start=(doc_line_x, doc_y), end=(doc_line_x + timeline_length, doc_y), stroke='#111111',
                     stroke_width=1, stroke_opacity='0.3'
                 ))
-
-                for revision in doc.document.revision_dates:
-                    revision_x = (revision - start_date).days + x_buffer + track_title_length + rx + area_title_length
-                    print("REVISION", revision, revision_x, revision_y)
-                    dwg.add(dwg.circle(
-                        centre=(revision_x, revision_y), r=10, fill='#ffffff'
-                    ))
 
                 doc_num = doc_num + 1
             y_offset = y_offset + group.height
@@ -417,7 +424,7 @@ def draw_docs(areas, dwg, start_date, timeline_length):
 
 
 def draw_scale(dwg, start_date, end_date, areas_height):
-    left_x = x_buffer + track_title_length + rx + area_title_length
+    left_x = x_buffer + track_title_length + area_title_length
     right_x = left_x + (end_date - start_date).days
     y = areas_height + y_buffer + scale_y_offset
 
@@ -444,7 +451,7 @@ def draw_scale(dwg, start_date, end_date, areas_height):
 
 
 def draw_axis_gridlines(dwg, start_date, end_date, areas_height):
-    left_x = x_buffer + track_title_length + rx + area_title_length
+    left_x = x_buffer + track_title_length + area_title_length
     right_x = left_x + (end_date - start_date).days
     track_bottom_y = areas_height + y_buffer
     timeline_y = areas_height + y_buffer + scale_y_offset
@@ -474,7 +481,7 @@ def draw_axis_gridlines(dwg, start_date, end_date, areas_height):
 
 
 def draw_timeline(areas, time_delta, start_date, end_date):
-    img_length = time_delta.days + (2 * x_buffer) + (2 * rx) + track_title_length + area_title_length
+    img_length = time_delta.days + (2 * x_buffer) + track_title_length + area_title_length
     total_areas_height = 0
 
     for area in areas.values():
@@ -482,13 +489,16 @@ def draw_timeline(areas, time_delta, start_date, end_date):
 
     img_height = (y_buffer * 2) + total_areas_height + scale_y_offset
 
-    dwg = svgwrite.Drawing(filename='timeline.svg', debug=False, size=(img_length, img_height))
+    dwg = svgwrite.Drawing(filename='output/timeline.svg', debug=False, size=(img_length, img_height))
 
     draw_areas(areas, dwg)
-    draw_tracks(areas, dwg, img_length)
+    draw_tracks(areas, dwg, time_delta.days)
     draw_scale(dwg, start_date, end_date, total_areas_height)
     draw_axis_gridlines(dwg, start_date, end_date, total_areas_height)
     draw_docs(areas, dwg, start_date, time_delta.days)
+
+    if not os.path.exists('output'):
+        os.makedirs('output')
 
     dwg.save()
 
