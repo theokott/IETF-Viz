@@ -1,12 +1,12 @@
 # TODO:
 #       CSS and HTML for styling and presentation!
-#       Arrows showing relationships
+#       Arrows showing relationships or some other way of showing that 1 doc can have multiple reference types!
 #       Show future docs!
-#       Handle the big spaces at the start and end of the tracks
 #       Show drafts of the root doc
-#       Make less calls for events! Do it once.
-#       Duplicate docs need to be checked and removed (RFC 8008)
-#       Positioning is messed up (RFC 4561)
+#       The same data produces different layouts due to async in get_source_references causing different
+#           orderings of lists?
+#       Refactor DrawingDoc, etc to have less spaghetti-like constructors?
+#       Come up with a better name than "No Area"
 
 import requests as rq
 import documents as docs
@@ -47,37 +47,73 @@ def convert_string_to_datetime(string):
                              second=int(time_split[2]))
 
 
-def get_doc_info(name):
-    json = rq.get(base + '/api/v1/doc/document/' + name).json()
+def update_doc_info(doc):
+    json = rq.get(base + '/api/v1/doc/document/' + doc.id).json()
 
-    update_doc = doc_cache[name]
-    update_doc.set_draft_name(json['name'])
-    update_doc.set_title(json['title'])
-    update_doc.set_abstract(json['abstract'])
-    update_doc.set_group_url(json['group'])
-    update_doc.set_rfc_num(json['rfc'])
+    doc.set_draft_name(json['name'])
+    doc.set_title(json['title'])
+    doc.set_abstract(json['abstract'])
+    doc.set_group_url(json['group'])
+    doc.set_rfc_num(json['rfc'])
 
     if json['expires'] == None:
         today = datetime.datetime.today()
-        update_doc.set_expiry_date(today)
+        doc.set_expiry_date(today)
     else:
         expiry_datetime = convert_string_to_datetime(json['expires'])
-        update_doc.set_expiry_date(expiry_datetime)
+        doc.set_expiry_date(expiry_datetime)
+
+    return doc
+
+
+def update_doc_events(doc):
+    events = get_events(doc.id)
+
+    publish_event = get_publish_event(events)
+
+    if publish_event is not None:
+        publish_date = convert_string_to_datetime(publish_event['time'])
+        doc.set_publish_date(publish_date)
+
+    for revision in get_revision_events(events):
+        revision_datetime = convert_string_to_datetime(revision['time'])
+        doc.add_revision(revision_datetime)
+
+    creation_event = get_creation_event(events)
+    creation_date = convert_string_to_datetime(creation_event['time'])
+    doc.set_creation_date(creation_date)
+
+
+def update_doc_groups(doc):
+    group_id = int(doc.group_url.split('/')[-2])
+
+    doc.set_group(get_group(group_id))
+
+    doc.set_area_url(doc.group.parent_url)
+
+    print(doc.group.name, doc.group_url, doc.area_url)
+
+    # Not all groups are part of areas (such as
+    if doc.area_url is not None:
+        area_id = int(doc.area_url.split('/')[-2])
+        doc.set_area(get_group(area_id))
+
+    else:
+        area_id = -1
+        doc.set_area(get_group(area_id))
 
 
 def get_relationships(doc_name):
-    relationships = []
-    next = '/api/v1/doc/docevent/?limit=50&source=' + doc_name
+    relationships = list()
+    next = '/api/v1/doc/relateddocument/?limit=50&source=' + doc_name
 
     while next is not None:
-        resp = rq.get(base + '/api/v1/doc/relateddocument/?limit=50&source=' + doc_name)
+        resp = rq.get(base + next)
         json = resp.json()
         meta_data = json['meta']
         next = meta_data['next']
 
         relationships = relationships + resp.json().get('objects')
-
-
 
     return relationships
 
@@ -92,20 +128,19 @@ def build_group(group_id):
 
     group_cache[group_id] = new_group
 
+    return new_group
+
 
 def get_group(group_id):
     if group_id in group_cache.keys():
         return group_cache[group_id]
 
     else:
-        build_group(group_id)
-        return group_cache[group_id]
+
+        return build_group(group_id)
 
 
-def get_publish_event(name):
-    events_json = rq.get(base + '/api/v1/doc/docevent/?limit=50&doc=' + doc_cache[name].draft_name).json()
-    events = events_json['objects']
-
+def get_publish_event(events):
     for event in events:
         if event['type'] == 'published_rfc':
             return event
@@ -113,81 +148,59 @@ def get_publish_event(name):
     return None
 
 
-def get_revision_events(name):
-    next = '/api/v1/doc/docevent/?limit=50&doc=' + doc_cache[name].draft_name
-    revisions = []
+def get_revision_events(events):
+    revisions = list()
 
-    while next is not None:
-        events_json = rq.get(base + next).json()
-        meta_data = events_json['meta']
-        next = meta_data['next']
-        events = events_json['objects']
-
-        for event in events:
-            if event['type'] == 'new_revision':
-                revisions.append(event)
+    for event in events:
+        if event['type'] == 'new_revision':
+            revisions.append(event)
 
     return revisions
 
 
 # Some documents don't have "new_revision" types so the earliest possible event is used instead as the event
-def get_earliest_event(name):
-    next = '/api/v1/doc/docevent/?limit=50&doc=' + doc_cache[name].draft_name
-    earliest_event = None
+def get_creation_event(events):
+    earliest_creation_event = None
 
-    while next is not None:
-        events_json = rq.get(base + next).json()
-        meta_data = events_json['meta']
-        next = meta_data['next']
-        events = events_json['objects']
+    for event in events:
+        if event['type'] == 'new_revision':
+            earliest_creation_event = event
 
-        for event in events:
-            if event['type'] == 'new_revision':
-                earliest_event = event
-
-    if earliest_event is None:
+    if earliest_creation_event is None:
         return events[-1]
     else:
-        return earliest_event
+        return earliest_creation_event
 
 
-def build_doc_draft_name(name, alt_name=None):
-    doc_cache[name] = docs.Document(name)
-    get_doc_info(name)
+def get_events(name):
+    next_url = '/api/v1/doc/docevent/?limit=50&doc=' + name
 
-    publish_event = get_publish_event(name)
+    events = list()
 
-    if publish_event is not None:
-        publish_date = convert_string_to_datetime(publish_event['time'])
-        doc_cache[name].set_publish_date(publish_date)
+    while next_url is not None:
+        events_json = rq.get(base + next_url).json()
+        meta_data = events_json['meta']
+        next_url = meta_data['next']
+        events = events + events_json['objects']
 
-    for revision in get_revision_events(name):
-        revision_datetime = convert_string_to_datetime(revision['time'])
-        doc_cache[name].add_revision(revision_datetime)
-
-    creation_event = get_earliest_event(name)
-    creation_date = convert_string_to_datetime(creation_event['time'])
-    doc_cache[name].set_creation_date(creation_date)
-
-    # Create the group that the doc is part of
-    group_url = doc_cache[name].group_url
-    group_id = int(group_url.split('/')[-2])
+    return events
 
 
-    # Add the group's info to the doc's group fields
-    doc_cache[name].set_group(get_group(group_id))
-    doc_cache[name].set_area_url(group_cache[group_id].parent_url)
+def build_doc(doc_id, alt_name=None):
+    new_doc = docs.Document(doc_id)
 
-    # Add info for the doc's area/group's parent
-    parent_url = group_cache[group_id].parent_url
-    parent_id = int(parent_url.split('/')[-2])
+    update_doc_info(new_doc)
+    update_doc_events(new_doc)
+    update_doc_groups(new_doc)
 
-    doc_cache[name].set_area(get_group(parent_id))
+    doc_cache[doc_id] = new_doc
 
     if alt_name is not None:
-        doc_cache[alt_name] = doc_cache[name]
+        doc_cache[alt_name] = doc_cache[doc_id]
 
+    return new_doc
 
+# Some documents have multiple names. Tbis resolves them to the unique name used to identify them in the Datatracker
 def get_doc_alias(name):
     json = rq.get(base + '/api/v1/doc/docalias/' + name).json()
     doc_url = json['document']
@@ -202,14 +215,14 @@ def get_doc(name):
         return doc_cache[name]
 
     else:
-        alias = get_doc_alias(name)
+        doc_id = get_doc_alias(name)
 
-        if alias in doc_cache.keys():
-            doc_cache[name] = doc_cache[alias]
+        if doc_id in doc_cache.keys():
+            doc_cache[name] = doc_cache[doc_id]
+            return doc_cache[name]
+
         else:
-            build_doc_draft_name(alias, alt_name=name)
-
-        return doc_cache[name]
+            return build_doc(doc_id, alt_name=name)
 
 
 def build_reference(reference, target_doc_name):
@@ -221,12 +234,10 @@ def build_reference(reference, target_doc_name):
 
 def get_source_references(root):
     executor = ThreadPoolExecutor(max_workers=500)
-    futures = []
-    references = []
+    futures = list()
+    references = list()
 
     relationships = get_relationships(root.draft_name)
-
-    print(relationships)
 
     for relationship in relationships:
         new_reference = docs.Reference()
@@ -394,9 +405,6 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                     insert=(doc_x, doc_y - doc_height), size=(doc_length, doc_height),fill=colour,
                     stroke='#000000', stroke_width=width, stroke_dasharray=stroke_style))
 
-                print("DOC LENGTH:", doc_length, "LAST X:", doc_x + doc_length, "TRACK LAST X:", x_buffer + track_title_length + area_title_length + timeline_length)
-
-
                 # Draw vertical lines in bars to indicate new revisions of the document
                 for revision in doc.document.revision_dates:
                     revision_x = (revision - start_date).days + x_buffer + track_title_length + area_title_length
@@ -516,22 +524,48 @@ def filter_references(references):
     return list(filter(filter_lambda, references))
 
 
+# If there are multiple, distinct reference objects that have the same target and type they are considered duplicates
+def remove_duplicate_references(references):
+    seen = set()
+    unique_references = list()
+
+    for reference in references:
+        reference_tuple = (reference.target.draft_name, reference.type)
+
+        if reference_tuple not in seen:
+            seen.add(reference_tuple)
+            unique_references.append(reference)
+
+    return unique_references
+
+
+def get_latest_date(doc):
+    if doc.publish_date is not None:
+        return doc.publish_date
+    elif doc.expiry_date is not None:
+        return doc.expiry_date
+    else:
+        return doc.creation_date
+
+
+def get_earliest_date(doc):
+    return min(doc.expiry_date, doc.publish_date, doc.creation_date)
+
+
 def generate_timeline(rfc_num):
 
     root = get_doc(rfc_num)
 
-    print("root", root.id)
+    related_docs = get_source_references(root)
+    references = remove_duplicate_references(filter_references(related_docs))
 
-    references = get_source_references(root)
+    desc_references = list(references)
+    desc_references.sort(key=lambda x: get_latest_date(x.target), reverse=True)
+    asc_references = list(references)
+    asc_references.sort(key=lambda x: get_earliest_date(x.target), reverse=False)
 
-    for reference in references:
-        print("id:", reference.target.id, "expiry:", reference.target.expiry_date)
-
-    references.sort(key=(lambda x: x.target.expiry_date), reverse=True)
-    references = filter_references(references)
-
-    end_date = references[0].source.expiry_date
-    start_date = references[-1].target.creation_date
+    end_date = max(get_latest_date(desc_references[0].source), get_latest_date(desc_references[0].target))
+    start_date = min(get_earliest_date(asc_references[0].source), get_earliest_date(asc_references[0].target))
 
     time_delta = end_date - start_date
 
@@ -579,12 +613,21 @@ def generate_timeline(rfc_num):
     draw_timeline(areas, time_delta, start_date, end_date)
 
 
+def initialise_caches():
+    if -1 not in group_cache.keys():
+        no_area = docs.Group(-1)
+        no_area.set_name("No Area")
+        group_cache[-1] = no_area
+
+
 def main():
+    initialise_caches()
     rfc_num = 'rfc' + input('Enter the requested RFC number: ')
     root_doc = get_doc(rfc_num)
     doc_cache[root_doc.id] = root_doc
 
     generate_timeline(rfc_num)
+
 
 unpickle_caches()
 main()
