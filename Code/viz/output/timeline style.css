@@ -1,0 +1,26 @@
+.timeline .svg g .tooltip {
+    pointer-events:none; /*let mouse events pass through*/
+    opacity:0;
+    transition: opacity 0.3s;
+    text-shadow:1px 1px 0px gray;
+}
+g .tooltip:not(.css) {
+  fill:currentColor;
+}
+rect:hover + g.tooltip.css {
+  opacity:1;
+}
+object {
+}
+body {
+  max-width: 40em;
+  margin-left:auto;
+  margin-right:auto;
+  background: lightyellow;
+}
+
+.timeline {}
+
+svg {}
+
+g{}

@@ -401,8 +401,18 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                     stroke_style = '10, 5'
 
                 # Draw the rectangle representing the doc
-                dwg.add(dwg.rect(
+
+                svg_group = dwg.add(svgwrite.container.Group())
+
+                svg_tooltip = svg_group.add(svgwrite.container.Group())
+                svg_tooltip.update({'class':'tooltip'})
+
+                svg_group.add(dwg.rect(
                     insert=(doc_x, doc_y - doc_height), size=(doc_length, doc_height),fill=colour,
+                    stroke='#000000', stroke_width=width, stroke_dasharray=stroke_style))
+                svg_tooltip.add(dwg.text(text=doc.document.abstract, insert=(doc_x, doc_y - doc_height)))
+                svg_tooltip.add(dwg.rect(
+                    insert=(doc_x-50, doc_y), size=(doc_length, doc_height),fill=colour,
                     stroke='#000000', stroke_width=width, stroke_dasharray=stroke_style))
 
                 # Draw vertical lines in bars to indicate new revisions of the document
