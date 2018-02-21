@@ -1,4 +1,4 @@
-.timeline .svg g .tooltip {
+.tooltip {
     pointer-events:none; /*let mouse events pass through*/
     opacity:0;
     transition: opacity 0.3s;
@@ -10,17 +10,3 @@ g .tooltip:not(.css) {
 rect:hover + g.tooltip.css {
   opacity:1;
 }
-object {
-}
-body {
-  max-width: 40em;
-  margin-left:auto;
-  margin-right:auto;
-  background: lightyellow;
-}
-
-.timeline {}
-
-svg {}
-
-g{}

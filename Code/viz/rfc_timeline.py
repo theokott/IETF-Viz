@@ -405,7 +405,7 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                 svg_group = dwg.add(svgwrite.container.Group())
 
                 svg_tooltip = svg_group.add(svgwrite.container.Group())
-                svg_tooltip.update({'class':'tooltip'})
+                svg_tooltip.update({'class':'tooltip css'})
 
                 svg_group.add(dwg.rect(
                     insert=(doc_x, doc_y - doc_height), size=(doc_length, doc_height),fill=colour,
@@ -508,6 +508,9 @@ def draw_timeline(areas, time_delta, start_date, end_date):
     img_height = (y_buffer * 2) + total_areas_height + scale_y_offset
 
     dwg = svgwrite.Drawing(filename='output/timeline.svg', debug=False, size=(img_length, img_height))
+    dwg.add(svgwrite.container.Style(
+        ".tooltip {pointer-events:all; /*let mouse events pass through*/opacity:0;transition: opacity 0.3s;text-shadow:1px 1px 0px gray;}g .tooltip:not(.css) {fill:currentColor;} g.tooltip.css:hover{pointer-events: all;;opacity:1}"
+    ))
 
     draw_areas(areas, dwg)
     draw_tracks(areas, dwg, time_delta.days)
