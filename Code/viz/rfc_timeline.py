@@ -400,16 +400,15 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                     width = 4
                     stroke_style = '10, 5'
 
-                # Draw the rectangle representing the doc
-
-                svg_group = dwg.add(svgwrite.container.Group())
-
-                svg_tooltip = svg_group.add(svgwrite.container.Group())
-                svg_tooltip.update({'class':'tooltip css'})
-
-                svg_group.add(dwg.rect(
+                # Draw the bar representing the doc
+                dwg.add(dwg.rect(
                     insert=(doc_x, doc_y - doc_height), size=(doc_length, doc_height),fill=colour,
                     stroke='#000000', stroke_width=width, stroke_dasharray=stroke_style))
+
+                # Draw the tooltip for the document
+                svg_tooltip = dwg.add(svgwrite.container.Group())
+                svg_tooltip.update({'class':'tooltip css'})
+
                 svg_tooltip.add(dwg.text(text=doc.document.abstract, insert=(doc_x, doc_y - doc_height)))
                 svg_tooltip.add(dwg.rect(
                     insert=(doc_x-50, doc_y), size=(doc_length, doc_height),fill=colour,
@@ -509,7 +508,9 @@ def draw_timeline(areas, time_delta, start_date, end_date):
 
     dwg = svgwrite.Drawing(filename='output/timeline.svg', debug=False, size=(img_length, img_height))
     dwg.add(svgwrite.container.Style(
-        ".tooltip {pointer-events:all; /*let mouse events pass through*/opacity:0;transition: opacity 0.3s;text-shadow:1px 1px 0px gray;}g .tooltip:not(.css) {fill:currentColor;} g.tooltip.css:hover{pointer-events: all;;opacity:1}"
+        ".tooltip {pointer-events:all; opacity:0;transition: opacity 0.3s;}" +
+        "rect:hover + .tooltip {pointer-events: all;opacity:1}" +
+        "rect {pointer-events:all}"
     ))
 
     draw_areas(areas, dwg)
