@@ -508,7 +508,7 @@ def draw_timeline(areas, time_delta, start_date, end_date):
 
     dwg = svgwrite.Drawing(filename='output/timeline.svg', debug=False, size=(img_length, img_height))
     dwg.add(svgwrite.container.Style(
-        ".tooltip {pointer-events:all; opacity:0;transition: opacity 0.3s;}" +
+        ".tooltip {opacity:0; transition: opacity 0.3s;}" +
         "rect:hover + .tooltip {pointer-events: all;opacity:1}" +
         "rect {pointer-events:all}"
     ))
