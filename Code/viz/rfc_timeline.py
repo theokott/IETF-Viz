@@ -403,16 +403,16 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                 # Draw the bar representing the doc
                 dwg.add(dwg.rect(
                     insert=(doc_x, doc_y - doc_height), size=(doc_length, doc_height),fill=colour,
-                    stroke='#000000', stroke_width=width, stroke_dasharray=stroke_style))
+                    stroke='#000000', stroke_width=width, stroke_dasharray=stroke_style, title="Abstract: " + doc.document.abstract))
 
-                # Draw the tooltip for the document
-                svg_tooltip = dwg.add(svgwrite.container.Group())
-                svg_tooltip.update({'class':'tooltip css'})
-
-                svg_tooltip.add(dwg.text(text=doc.document.abstract, insert=(doc_x, doc_y - doc_height)))
-                svg_tooltip.add(dwg.rect(
-                    insert=(doc_x-50, doc_y), size=(doc_length, doc_height),fill=colour,
-                    stroke='#000000', stroke_width=width, stroke_dasharray=stroke_style))
+                # # Draw the tooltip for the document
+                # svg_tooltip = dwg.add(svgwrite.container.Group())
+                # svg_tooltip.update({'class':'tooltip css'})
+                #
+                # svg_tooltip.add(dwg.text(text=doc.document.abstract, insert=(doc_x, doc_y - doc_height)))
+                # svg_tooltip.add(dwg.rect(
+                #     insert=(doc_x-50, doc_y), size=(doc_length, doc_height),fill=colour,
+                #     stroke='#000000', stroke_width=width, stroke_dasharray=stroke_style))
 
                 # Draw vertical lines in bars to indicate new revisions of the document
                 for revision in doc.document.revision_dates:
@@ -512,6 +512,22 @@ def draw_timeline(areas, time_delta, start_date, end_date):
         "rect:hover + .tooltip {pointer-events: all;opacity:1}" +
         "rect {pointer-events:all}"
     ))
+
+    dwg.add(
+        svgwrite.container.Script(
+            content="$(document).ready(function() {$('.tooltip').tooltipster({theme: 'tooltipster-punk','maxWidth': 270, // set max width of tooltip boxcontentAsHTML: true, // set title content to htmltrigger: 'custom', // add custom triggertriggerOpen: { // open tooltip when element is clicked, tapped (mobile) or hoveredclick: true,tap: true,mouseenter: true},triggerClose: { // close tooltip when element is clicked again, tapped or when the mouse leaves itclick: true,scroll: false, // ensuring that scrolling mobile is not tapping!tap: true,mouseleave: true}});});"
+        )
+    )
+    dwg.add(
+        svgwrite.container.Script(
+            href="http://code.jquery.com/jquery-1.10.0.min.js"
+        )
+    )
+    dwg.add(
+        svgwrite.container.Script(
+            href="tooltipster.bundle.min.js"
+        )
+    )
 
     draw_areas(areas, dwg)
     draw_tracks(areas, dwg, time_delta.days)
