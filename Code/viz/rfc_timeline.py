@@ -328,7 +328,7 @@ def draw_areas(areas, dwg):
 
         dwg.add(dwg.text(
             text=area.name, insert=(x_buffer + 10, y_offset + 10),
-            textLength=[area_title_length], lengthAdjust='spacing',
+            textLength=area_title_length, lengthAdjust='spacing',
             writing_mode='tb'
         ))
 
@@ -352,7 +352,7 @@ def draw_tracks(areas, dwg, length):
 
             dwg.add(dwg.text(
                 text=group.name, insert=(x + 10, y_title),
-                textLength=[track_height], lengthAdjust='spacing'))
+                textLength=track_height, lengthAdjust='spacing'))
 
             dwg.add(dwg.line(
                 start=(x + track_title_length, y_offset),
@@ -363,6 +363,20 @@ def draw_tracks(areas, dwg, length):
             y_offset = y_offset + group.height
 
         area_count = area_count + 1
+
+
+def draw_tooltip(dwg):
+    dwg.add(dwg.rect(
+        id='tooltip_bg', visibility='hidden', rx='4', ry='4'
+    ))
+
+    dwg.add(dwg.text(
+        id = 'draft', text='Draft:', visibility='hidden'
+    ))
+
+    dwg.add(dwg.text(
+        id = 'abstract', text='Abstract:', visibility='hidden'
+    ))
 
 
 def draw_docs(areas, dwg, start_date, timeline_length):
@@ -401,9 +415,13 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                     stroke_style = '10, 5'
 
                 # Draw the bar representing the doc
-                dwg.add(dwg.rect(
+                doc_rect = dwg.rect(
                     insert=(doc_x, doc_y - doc_height), size=(doc_length, doc_height),fill=colour,
-                    stroke='#000000', stroke_width=width, stroke_dasharray=stroke_style, title="Abstract: " + doc.document.abstract))
+                    stroke='#000000', stroke_width=width
+                )
+                doc_rect.update({'onmousemove' : 'ShowTooltip(evt, "' + doc.document.abstract + '")',
+                                 'onmouseout':'HideTooltip()'})
+                dwg.add(doc_rect)
 
                 # # Draw the tooltip for the document
                 # svg_tooltip = dwg.add(svgwrite.container.Group())
@@ -506,26 +524,50 @@ def draw_timeline(areas, time_delta, start_date, end_date):
 
     img_height = (y_buffer * 2) + total_areas_height + scale_y_offset
 
-    dwg = svgwrite.Drawing(filename='output/timeline.svg', debug=False, size=(img_length, img_height))
+    dwg = svgwrite.Drawing(filename='output/timeline.svg', size=(img_length, img_height), onload='init(evt)')
     dwg.add(svgwrite.container.Style(
-        ".tooltip {opacity:0; transition: opacity 0.3s;}" +
-        "rect:hover + .tooltip {pointer-events: all;opacity:1}" +
-        "rect {pointer-events:all}"
+        ".tooltip{width:30px; text-align:justify; word-break:break-all; white-space:pre-wrap}" +
+        ".tooltip_bg{fill: white; opacity: 0.85}"
     ))
 
     dwg.add(
         svgwrite.container.Script(
-            content="$(document).ready(function() {$('.tooltip').tooltipster({theme: 'tooltipster-punk','maxWidth': 270, // set max width of tooltip boxcontentAsHTML: true, // set title content to htmltrigger: 'custom', // add custom triggertriggerOpen: { // open tooltip when element is clicked, tapped (mobile) or hoveredclick: true,tap: true,mouseenter: true},triggerClose: { // close tooltip when element is clicked again, tapped or when the mouse leaves itclick: true,scroll: false, // ensuring that scrolling mobile is not tapping!tap: true,mouseleave: true}});});"
-        )
-    )
-    dwg.add(
-        svgwrite.container.Script(
-            href="http://code.jquery.com/jquery-1.10.0.min.js"
-        )
-    )
-    dwg.add(
-        svgwrite.container.Script(
-            href="tooltipster.bundle.min.js"
+            # content="function init(evt) {if(window.svgDocument==null) {svgDocument=evt.target.ownerDocument;} tooltip=svgDocument.getElementById('tooltip'); tooltip_bg=svgDocument.getElementById('tooltip_bg'); draft = svgDocument.getElementById('draft'); abstract = svgDocument.getElementById('abstract');}function ShowTooltip(evt, mouseovertext){tooltip.setAttributeNS(null,'x',evt.clientX+11);tooltip.setAttributeNS(null,'y',evt.clientY+25);draft.setAttributeNS(null,'x',evt.clientX+11);draft.setAttributeNS(null,'y',evt.clientY+27);abstract.setAttributeNS(null,'x',evt.clientX+11);abstract.setAttributeNS(null,'y',evt.clientY+45);draft.firstChild.data = 'blahblahblah\nblehblehbleh';abstract.firstChild.data = 'hahahahaha\nheheheheheh';tooltip.setAttributeNS(null,'visibility','visible');draft.setAttributeNS(null,'visibility','visible');abstract.setAttributeNS(null,'visibility','visible');console.log(draft.firstChild.data)console.log(abstract.firstChild.data)tooltip_bg.setAttributeNS(null,'x',evt.clientX+8);tooltip_bg.setAttributeNS(null,'y',evt.clientY+15);tooltip_bg.setAttributeNS(null,'visibility','visible');console.log('Show tooltip!')}function HideTooltip(){tooltip.setAttributeNS(null,'visibility','hidden');tooltip_bg.setAttributeNS(null,'visibility','hidden');}"
+            type='text/ecmascript',
+            content="      function init(evt)" +
+                    "      {" +
+                    "        if ( window.svgDocument == null )" +
+                    "        {" +
+                    "          svgDocument = evt.target.ownerDocument;" +
+                    "        }" +
+                    "        tooltip_bg = svgDocument.getElementById('tooltip_bg');" +
+                    "        draft = svgDocument.getElementById('draft');" +
+                    "        abstract = svgDocument.getElementById('abstract');" +
+                    "        console.log('init run')"
+                    "      }" +
+                    "      function ShowTooltip(evt, mouseovertext)" +
+                    "        {" +
+                    "          draft.setAttributeNS(null,\"x\",evt.clientX+11);" +
+                    "          draft.setAttributeNS(null,\"y\",evt.clientY+25);" +
+                    "          abstract.setAttributeNS(null,\"x\",evt.clientX+11);" +
+                    "          abstract.setAttributeNS(null,\"y\",evt.clientY+45);" +
+                    "          draft.firstChild.data = 'blahblahblah\\nblehblehbleh';" +
+                    "          abstract.firstChild.data = 'hahahahaha\\nheheheheheh';" +
+                    "          draft.setAttributeNS(null,\"visibility\",\"visible\");" +
+                    "          abstract.setAttributeNS(null,\"visibility\",\"visible\");" +
+                    "          console.log(draft.firstChild.data)" +
+                    "          console.log(abstract.firstChild.data)" +
+                    "          tooltip_bg.setAttributeNS(null,\"x\",evt.clientX+8);" +
+                    "          tooltip_bg.setAttributeNS(null,\"y\",evt.clientY+15);" +
+                    "          tooltip_bg.setAttributeNS(null,\"visibility\",\"visible\");" +
+                    "          console.log(\"Show tooltip!\")" +
+                    "        }" +
+                    "        function HideTooltip()" +
+                    "        {" +
+                    "          draft.setAttributeNS(null,\"visibility\",\"hidden\");" +
+                    "          abstract.setAttributeNS(null,\"visibility\",\"hidden\");" +
+                    "          tooltip_bg.setAttributeNS(null,\"visibility\",\"hidden\");" +
+                    "        }"
         )
     )
 
@@ -534,6 +576,7 @@ def draw_timeline(areas, time_delta, start_date, end_date):
     draw_scale(dwg, start_date, end_date, total_areas_height)
     draw_axis_gridlines(dwg, start_date, end_date, total_areas_height)
     draw_docs(areas, dwg, start_date, time_delta.days)
+    draw_tooltip(dwg)
 
     if not os.path.exists('output'):
         os.makedirs('output')
