@@ -12,7 +12,7 @@ import requests as rq
 import documents as docs
 import drawing
 from drawing import (rx, ry, x_buffer, y_buffer, track_height, track_title_length, area_title_length, date_y_offset,
-                     date_x_offset, doc_height, colours, track_colours, scale_y_offset)
+                     date_x_offset, doc_height, colours, track_colours, scale_y_offset, tooltip_width)
 import _pickle as pickle
 import svgwrite
 import datetime
@@ -184,6 +184,24 @@ def get_events(name):
         events = events + events_json['objects']
 
     return events
+
+
+def get_tooltip_text(doc):
+    text = 'Title: ' + doc.title + '   ' + \
+           'Draft name: ' + doc.draft_name + '   ' + \
+           'Abstract: ' + doc.abstract + '   ' + \
+           'Group: ' + doc.group.name + '   ' + \
+           'Area: ' + doc.area.name + '   ' + \
+           'Creation: ' + doc.creation_date.strftime('%m/%d/%Y') + '   '
+
+    if doc.publish_date is None:
+        text = text + 'Publish: ' + 'None'
+    else:
+        text = text + 'Publish: ' + doc.publish_date.strftime('%m/%d/%Y')
+
+    text = text.replace('\"', '\'')
+
+    return text
 
 
 def build_doc(doc_id, alt_name=None):
@@ -371,11 +389,31 @@ def draw_tooltip(dwg):
     ))
 
     dwg.add(dwg.text(
-        id = 'draft', text='Draft:', visibility='hidden'
+        id='title', text='Title:', visibility='hidden'
     ))
 
     dwg.add(dwg.text(
-        id = 'abstract', text='Abstract:', visibility='hidden'
+        id='draft', text='Draft:', visibility='hidden'
+    ))
+
+    dwg.add(dwg.text(
+        id='abstract', text='Abstract:', visibility='hidden'
+    ))
+
+    dwg.add(dwg.text(
+        id='group', text='Group:', visibility='hidden'
+    ))
+
+    dwg.add(dwg.text(
+        id='area', text='Area:', visibility='hidden'
+    ))
+
+    dwg.add(dwg.text(
+        id='creation', text='Creation:', visibility='hidden'
+    ))
+
+    dwg.add(dwg.text(
+        id='publish', text='Publish:', visibility='hidden'
     ))
 
 
@@ -395,6 +433,7 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                         + x_buffer + track_title_length + area_title_length
                 doc_y = y_offset + (doc_height * doc_num)
                 name_text = doc.document.title
+                tooltip_text = get_tooltip_text(doc.document)
 
                 if (doc.document.publish_date - doc.document.creation_date).days < 150:
                     doc_length = 150
@@ -403,23 +442,23 @@ def draw_docs(areas, dwg, start_date, timeline_length):
 
                 if doc.reference_type == 'refinfo':
                     width = 1
-                    stroke_style = '10, 0'
+                    stroke_style = '10,0'
                 elif doc.reference_type == 'refnorm':
                     width = 4
-                    stroke_style = '10, 0'
+                    stroke_style = '10,5'
                 elif doc.reference_type == 'root':
                     width = 10
-                    stroke_style = '10, 0'
+                    stroke_style = '10,0'
                 else:
                     width = 4
-                    stroke_style = '10, 5'
+                    stroke_style = '10,5'
 
                 # Draw the bar representing the doc
                 doc_rect = dwg.rect(
                     insert=(doc_x, doc_y - doc_height), size=(doc_length, doc_height),fill=colour,
-                    stroke='#000000', stroke_width=width
+                    stroke='#000000', stroke_width=width, stroke_dasharray=stroke_style
                 )
-                doc_rect.update({'onmousemove' : 'ShowTooltip(evt, "' + doc.document.abstract + '")',
+                doc_rect.update({'onmousemove' : 'ShowTooltip(evt, "' + tooltip_text + '")',
                                  'onmouseout':'HideTooltip()'})
                 dwg.add(doc_rect)
 
@@ -526,47 +565,82 @@ def draw_timeline(areas, time_delta, start_date, end_date):
 
     dwg = svgwrite.Drawing(filename='output/timeline.svg', size=(img_length, img_height), onload='init(evt)')
     dwg.add(svgwrite.container.Style(
-        ".tooltip{width:30px; text-align:justify; word-break:break-all; white-space:pre-wrap}" +
-        ".tooltip_bg{fill: white; opacity: 0.85}"
+        ".tooltip{width:300px; text-align:justify; word-break:break-all; white-space:pre-wrap}" +
+        ".tooltip_bg{fill: white; opacity: 0.85}" +
+        ".abstract{fill: white; opacity: 0.85}"
     ))
 
     dwg.add(
         svgwrite.container.Script(
-            # content="function init(evt) {if(window.svgDocument==null) {svgDocument=evt.target.ownerDocument;} tooltip=svgDocument.getElementById('tooltip'); tooltip_bg=svgDocument.getElementById('tooltip_bg'); draft = svgDocument.getElementById('draft'); abstract = svgDocument.getElementById('abstract');}function ShowTooltip(evt, mouseovertext){tooltip.setAttributeNS(null,'x',evt.clientX+11);tooltip.setAttributeNS(null,'y',evt.clientY+25);draft.setAttributeNS(null,'x',evt.clientX+11);draft.setAttributeNS(null,'y',evt.clientY+27);abstract.setAttributeNS(null,'x',evt.clientX+11);abstract.setAttributeNS(null,'y',evt.clientY+45);draft.firstChild.data = 'blahblahblah\nblehblehbleh';abstract.firstChild.data = 'hahahahaha\nheheheheheh';tooltip.setAttributeNS(null,'visibility','visible');draft.setAttributeNS(null,'visibility','visible');abstract.setAttributeNS(null,'visibility','visible');console.log(draft.firstChild.data)console.log(abstract.firstChild.data)tooltip_bg.setAttributeNS(null,'x',evt.clientX+8);tooltip_bg.setAttributeNS(null,'y',evt.clientY+15);tooltip_bg.setAttributeNS(null,'visibility','visible');console.log('Show tooltip!')}function HideTooltip(){tooltip.setAttributeNS(null,'visibility','hidden');tooltip_bg.setAttributeNS(null,'visibility','hidden');}"
             type='text/ecmascript',
-            content="      function init(evt)" +
+            content="function init(evt)" +
                     "      {" +
                     "        if ( window.svgDocument == null )" +
                     "        {" +
                     "          svgDocument = evt.target.ownerDocument;" +
                     "        }" +
                     "        tooltip_bg = svgDocument.getElementById('tooltip_bg');" +
+                    "        title = svgDocument.getElementById('title');" +
                     "        draft = svgDocument.getElementById('draft');" +
                     "        abstract = svgDocument.getElementById('abstract');" +
-                    "        console.log('init run')"
+                    "        group = svgDocument.getElementById('group');" +
+                    "        area = svgDocument.getElementById('area');" +
+                    "        creation = svgDocument.getElementById('creation');" +
+                    "        publish = svgDocument.getElementById('publish');" +
+                    "        console.log(\"INIT RUN\");" +
                     "      }" +
                     "      function ShowTooltip(evt, mouseovertext)" +
                     "        {" +
+                    "          var splitText = mouseovertext.split(\"   \");" +
+                    "          var maxLength = 0;" +
+                    "          console.log(\"split: \" + splitText);" +
+                    "          for (i = 0; i < splitText.length; i++)" +
+                    "            if (splitText[i].length > maxLength) {" +
+                    "                maxLength = splitText.length;" +
+                    "            }" +
+                    "          title.setAttributeNS(null,\"x\",evt.clientX+11);" +
+                    "          title.setAttributeNS(null,\"y\",evt.clientY+25);" +
+                    "          title.setAttributeNS(null,\"visibility\",\"visible\");" +
                     "          draft.setAttributeNS(null,\"x\",evt.clientX+11);" +
-                    "          draft.setAttributeNS(null,\"y\",evt.clientY+25);" +
-                    "          abstract.setAttributeNS(null,\"x\",evt.clientX+11);" +
-                    "          abstract.setAttributeNS(null,\"y\",evt.clientY+45);" +
-                    "          draft.firstChild.data = 'blahblahblah\\nblehblehbleh';" +
-                    "          abstract.firstChild.data = 'hahahahaha\\nheheheheheh';" +
+                    "          draft.setAttributeNS(null,\"y\",evt.clientY+45);" +
                     "          draft.setAttributeNS(null,\"visibility\",\"visible\");" +
+                    "          abstract.setAttributeNS(null,\"x\",evt.clientX+11);" +
+                    "          abstract.setAttributeNS(null,\"y\",evt.clientY+65);" +
                     "          abstract.setAttributeNS(null,\"visibility\",\"visible\");" +
-                    "          console.log(draft.firstChild.data)" +
-                    "          console.log(abstract.firstChild.data)" +
+                    "          group.setAttributeNS(null,\"x\",evt.clientX+11);" +
+                    "          group.setAttributeNS(null,\"y\",evt.clientY+85);" +
+                    "          group.setAttributeNS(null,\"visibility\",\"visible\");" +
+                    "          area.setAttributeNS(null,\"x\",evt.clientX+11);" +
+                    "          area.setAttributeNS(null,\"y\",evt.clientY+105);" +
+                    "          area.setAttributeNS(null,\"visibility\",\"visible\");" +
+                    "          creation.setAttributeNS(null,\"x\",evt.clientX+11);" +
+                    "          creation.setAttributeNS(null,\"y\",evt.clientY+125);" +
+                    "          creation.setAttributeNS(null,\"visibility\",\"visible\");" +
+                    "          publish.setAttributeNS(null,\"x\",evt.clientX+11);" +
+                    "          publish.setAttributeNS(null,\"y\",evt.clientY+145);" +
+                    "          publish.setAttributeNS(null,\"visibility\",\"visible\");" +
+                    "          title.firstChild.data = splitText[0];" +
+                    "          draft.firstChild.data = splitText[1];" +
+                    "          abstract.firstChild.data = splitText[2];" +
+                    "          group.firstChild.data = splitText[3];" +
+                    "          area.firstChild.data = splitText[4];" +
+                    "          creation.firstChild.data = splitText[5];" +
+                    "          publish.firstChild.data = splitText[6];" +
                     "          tooltip_bg.setAttributeNS(null,\"x\",evt.clientX+8);" +
-                    "          tooltip_bg.setAttributeNS(null,\"y\",evt.clientY+15);" +
+                    "          tooltip_bg.setAttributeNS(null,\"y\",evt.clientY+150);" +
+                    "          tooltip_bg.setAttributeNS(null,\"width\",maxLength);" +
                     "          tooltip_bg.setAttributeNS(null,\"visibility\",\"visible\");" +
-                    "          console.log(\"Show tooltip!\")" +
                     "        }" +
                     "        function HideTooltip()" +
                     "        {" +
+                    "          tooltip_bg.setAttributeNS(null,\"visibility\",\"hidden\");" +
+                    "          title.setAttributeNS(null,\"visibility\",\"hidden\");" +
                     "          draft.setAttributeNS(null,\"visibility\",\"hidden\");" +
                     "          abstract.setAttributeNS(null,\"visibility\",\"hidden\");" +
-                    "          tooltip_bg.setAttributeNS(null,\"visibility\",\"hidden\");" +
+                    "          group.setAttributeNS(null,\"visibility\",\"hidden\");" +
+                    "          area.setAttributeNS(null,\"visibility\",\"hidden\");" +
+                    "          creation.setAttributeNS(null,\"visibility\",\"hidden\");" +
+                    "          publish.setAttributeNS(null,\"visibility\",\"hidden\");" +
                     "        }"
         )
     )

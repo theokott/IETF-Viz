@@ -9,6 +9,7 @@ date_y_offset = 35
 date_x_offset = 70
 doc_height = 75
 scale_y_offset = 75
+tooltip_width = 300
 
 colours = ['#ff6666', '#ffb366', '#8cff66', '#66ffb3', '#66d9ff', '#6666ff', '#d966ff', '#ff66d9']
 track_colours = ['#ffcccc', '#ffe6cc', '#d9ffcc', '#ccffe6', '#ccf2ff', '#ccccff', '#f2ccff', '#ffccf2']
