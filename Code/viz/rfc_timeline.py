@@ -1,12 +1,10 @@
 # TODO:
-#       CSS and HTML for styling and presentation!
 #       Arrows showing relationships or some other way of showing that 1 doc can have multiple reference types!
 #       Show future docs!
 #       Show drafts of the root doc
 #       The same data produces different layouts due to async in get_source_references causing different
 #           orderings of lists?
 #       Refactor DrawingDoc, etc to have less spaghetti-like constructors?
-#       Come up with a better name than "No Area"
 
 import requests as rq
 import documents as docs
@@ -462,15 +460,6 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                                  'onmouseout':'HideTooltip()'})
                 dwg.add(doc_rect)
 
-                # # Draw the tooltip for the document
-                # svg_tooltip = dwg.add(svgwrite.container.Group())
-                # svg_tooltip.update({'class':'tooltip css'})
-                #
-                # svg_tooltip.add(dwg.text(text=doc.document.abstract, insert=(doc_x, doc_y - doc_height)))
-                # svg_tooltip.add(dwg.rect(
-                #     insert=(doc_x-50, doc_y), size=(doc_length, doc_height),fill=colour,
-                #     stroke='#000000', stroke_width=width, stroke_dasharray=stroke_style))
-
                 # Draw vertical lines in bars to indicate new revisions of the document
                 for revision in doc.document.revision_dates:
                     revision_x = (revision - start_date).days + x_buffer + track_title_length + area_title_length
@@ -554,6 +543,14 @@ def draw_axis_gridlines(dwg, start_date, end_date, areas_height):
         gridline_x = gridline_x + (next_year - last_year).days
 
 
+def get_file(filename):
+    file = open(filename, 'r')
+    script_string = file.read()
+    file.close()
+
+    return script_string
+
+
 def draw_timeline(areas, time_delta, start_date, end_date):
     img_length = time_delta.days + (2 * x_buffer) + track_title_length + area_title_length
     total_areas_height = 0
@@ -564,84 +561,12 @@ def draw_timeline(areas, time_delta, start_date, end_date):
     img_height = (y_buffer * 2) + total_areas_height + scale_y_offset
 
     dwg = svgwrite.Drawing(filename='output/timeline.svg', size=(img_length, img_height), onload='init(evt)')
-    dwg.add(svgwrite.container.Style(
-        ".tooltip{width:300px; text-align:justify; word-break:break-all; white-space:pre-wrap}" +
-        ".tooltip_bg{fill: white; opacity: 0.85}" +
-        ".abstract{fill: white; opacity: 0.85}"
-    ))
+    dwg.add(svgwrite.container.Style(get_file('output/timeline_style.css')))
 
     dwg.add(
         svgwrite.container.Script(
             type='text/ecmascript',
-            content="function init(evt)" +
-                    "      {" +
-                    "        if ( window.svgDocument == null )" +
-                    "        {" +
-                    "          svgDocument = evt.target.ownerDocument;" +
-                    "        }" +
-                    "        tooltip_bg = svgDocument.getElementById('tooltip_bg');" +
-                    "        title = svgDocument.getElementById('title');" +
-                    "        draft = svgDocument.getElementById('draft');" +
-                    "        abstract = svgDocument.getElementById('abstract');" +
-                    "        group = svgDocument.getElementById('group');" +
-                    "        area = svgDocument.getElementById('area');" +
-                    "        creation = svgDocument.getElementById('creation');" +
-                    "        publish = svgDocument.getElementById('publish');" +
-                    "        console.log(\"INIT RUN\");" +
-                    "      }" +
-                    "      function ShowTooltip(evt, mouseovertext)" +
-                    "        {" +
-                    "          var splitText = mouseovertext.split(\"   \");" +
-                    "          var maxLength = 0;" +
-                    "          console.log(\"split: \" + splitText);" +
-                    "          for (i = 0; i < splitText.length; i++)" +
-                    "            if (splitText[i].length > maxLength) {" +
-                    "                maxLength = splitText.length;" +
-                    "            }" +
-                    "          title.setAttributeNS(null,\"x\",evt.clientX+11);" +
-                    "          title.setAttributeNS(null,\"y\",evt.clientY+25);" +
-                    "          title.setAttributeNS(null,\"visibility\",\"visible\");" +
-                    "          draft.setAttributeNS(null,\"x\",evt.clientX+11);" +
-                    "          draft.setAttributeNS(null,\"y\",evt.clientY+45);" +
-                    "          draft.setAttributeNS(null,\"visibility\",\"visible\");" +
-                    "          abstract.setAttributeNS(null,\"x\",evt.clientX+11);" +
-                    "          abstract.setAttributeNS(null,\"y\",evt.clientY+65);" +
-                    "          abstract.setAttributeNS(null,\"visibility\",\"visible\");" +
-                    "          group.setAttributeNS(null,\"x\",evt.clientX+11);" +
-                    "          group.setAttributeNS(null,\"y\",evt.clientY+85);" +
-                    "          group.setAttributeNS(null,\"visibility\",\"visible\");" +
-                    "          area.setAttributeNS(null,\"x\",evt.clientX+11);" +
-                    "          area.setAttributeNS(null,\"y\",evt.clientY+105);" +
-                    "          area.setAttributeNS(null,\"visibility\",\"visible\");" +
-                    "          creation.setAttributeNS(null,\"x\",evt.clientX+11);" +
-                    "          creation.setAttributeNS(null,\"y\",evt.clientY+125);" +
-                    "          creation.setAttributeNS(null,\"visibility\",\"visible\");" +
-                    "          publish.setAttributeNS(null,\"x\",evt.clientX+11);" +
-                    "          publish.setAttributeNS(null,\"y\",evt.clientY+145);" +
-                    "          publish.setAttributeNS(null,\"visibility\",\"visible\");" +
-                    "          title.firstChild.data = splitText[0];" +
-                    "          draft.firstChild.data = splitText[1];" +
-                    "          abstract.firstChild.data = splitText[2];" +
-                    "          group.firstChild.data = splitText[3];" +
-                    "          area.firstChild.data = splitText[4];" +
-                    "          creation.firstChild.data = splitText[5];" +
-                    "          publish.firstChild.data = splitText[6];" +
-                    "          tooltip_bg.setAttributeNS(null,\"x\",evt.clientX+8);" +
-                    "          tooltip_bg.setAttributeNS(null,\"y\",evt.clientY+150);" +
-                    "          tooltip_bg.setAttributeNS(null,\"width\",maxLength);" +
-                    "          tooltip_bg.setAttributeNS(null,\"visibility\",\"visible\");" +
-                    "        }" +
-                    "        function HideTooltip()" +
-                    "        {" +
-                    "          tooltip_bg.setAttributeNS(null,\"visibility\",\"hidden\");" +
-                    "          title.setAttributeNS(null,\"visibility\",\"hidden\");" +
-                    "          draft.setAttributeNS(null,\"visibility\",\"hidden\");" +
-                    "          abstract.setAttributeNS(null,\"visibility\",\"hidden\");" +
-                    "          group.setAttributeNS(null,\"visibility\",\"hidden\");" +
-                    "          area.setAttributeNS(null,\"visibility\",\"hidden\");" +
-                    "          creation.setAttributeNS(null,\"visibility\",\"hidden\");" +
-                    "          publish.setAttributeNS(null,\"visibility\",\"hidden\");" +
-                    "        }"
+            content=get_file('output/scripts.js')
         )
     )
 
