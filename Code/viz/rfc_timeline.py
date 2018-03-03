@@ -2,9 +2,6 @@
 #       Arrows showing relationships or some other way of showing that 1 doc can have multiple reference types!
 #       Show future docs!
 #       Show drafts of the root doc
-#       The same data produces different layouts due to async in get_source_references causing different
-#           orderings of lists?
-#       Refactor DrawingDoc, etc to have less spaghetti-like constructors?
 
 import requests as rq
 import documents as docs
@@ -330,52 +327,77 @@ def pickle_caches():
     print('Group cache written to disk!')
 
 
+def draw_area(dwg, y_offset, height, name, track_colour):
+    y_title = y_offset + (height / 2)
+
+    dwg.add(dwg.rect(
+        insert=(x_buffer, y_offset), size=(area_title_length, height),
+        fill=track_colour, stroke='#000000'))
+
+    dwg.add(dwg.text(
+        text=name, insert=(x_buffer + 10, y_offset + 10),
+        textLength=area_title_length, lengthAdjust='spacing',
+        writing_mode='tb'
+    ))
+
 def draw_areas(areas, dwg):
     y_offset = 0 + y_buffer
     area_count = 0
 
-    for area in areas.values():
+    area_keys = list(areas.keys())
+    area_keys.sort()
+
+    print(area_keys)
+
+    for key in area_keys:
+        area = areas[key]
         track_colour = drawing.track_colours[area_count]
-        y_title = y_offset + (area.height / 2)
 
-        dwg.add(dwg.rect(
-            insert=(x_buffer, y_offset), size=(area_title_length, area.height),
-            fill=track_colour, stroke='#000000'))
-
-        dwg.add(dwg.text(
-            text=area.name, insert=(x_buffer + 10, y_offset + 10),
-            textLength=area_title_length, lengthAdjust='spacing',
-            writing_mode='tb'
-        ))
+        draw_area(dwg,y_offset, area.height, area.name, track_colour)
 
         area_count = area_count + 1
         y_offset = y_offset + area.height
 
 
+def draw_track(dwg, group, y_offset, track_length, track_colour):
+    x = x_buffer + area_title_length
+    y_title = y_offset + 20
+
+    dwg.add(dwg.rect(
+        insert=(x, y_offset), size=(track_length, group.height), fill=track_colour, stroke='#000000'))
+
+    dwg.add(dwg.text(
+        text=group.name, insert=(x + 10, y_title),
+        textLength=track_height, lengthAdjust='spacing'))
+
+    dwg.add(dwg.line(
+        start=(x + track_title_length, y_offset),
+        end=(x + track_title_length, y_offset + group.height),
+        stroke='#000000', stroke_width=2
+    ))
+
+
 def draw_tracks(areas, dwg, length):
     y_offset = 0 + y_buffer
     area_count = 0
-    x = x_buffer + area_title_length
     track_length = length + track_title_length
 
-    for area in areas.values():
+    area_keys = list(areas.keys())
+    area_keys.sort()
+
+    print(area_keys)
+
+    for area_key in area_keys:
+        area = areas[area_key]
+        group_keys = list(area.groups.keys())
+        group_keys.sort()
+        print(group_keys)
+
         track_colour = drawing.track_colours[area_count]
-        for group in area.groups.values():
-            y_title = y_offset + 20
 
-            dwg.add(dwg.rect(
-                insert=(x,y_offset), size=(track_length, group.height), fill=track_colour, stroke='#000000'))
-
-            dwg.add(dwg.text(
-                text=group.name, insert=(x + 10, y_title),
-                textLength=track_height, lengthAdjust='spacing'))
-
-            dwg.add(dwg.line(
-                start=(x + track_title_length, y_offset),
-                end=(x + track_title_length, y_offset + group.height),
-                stroke='#000000', stroke_width=2
-            ))
-
+        for group_key in group_keys:
+            group = area.groups[group_key]
+            draw_track(dwg, group, y_offset, track_length, track_colour)
             y_offset = y_offset + group.height
 
         area_count = area_count + 1
@@ -415,16 +437,60 @@ def draw_tooltip(dwg):
     ))
 
 
+def draw_doc(dwg, x, y, length, stroke_width, stroke_style, colour, tooltip_text, name):
+    # Draw the bar representing the doc
+    doc_rect = dwg.rect(
+        insert=(x, y - doc_height), size=(length, doc_height),fill=colour,
+        stroke='#000000', stroke_width=stroke_width, stroke_dasharray=stroke_style
+    )
+    doc_rect.update({'onmousemove' : 'ShowTooltip(evt, "' + tooltip_text + '")',
+                     'onmouseout':'HideTooltip()'})
+    dwg.add(doc_rect)
+
+    # Draw the name of the doc
+    dwg.add(dwg.text(
+        text=name, insert=(x, y - doc_height/2), textLength=str(length),
+        lengthAdjust='spacingAndGlyphs'
+    ))
+
+
+def draw_revisions(dwg, start_date, rev_dates, y):
+    for revision in rev_dates:
+        x = (revision - start_date).days + x_buffer + track_title_length + area_title_length
+
+        dwg.add(dwg.line(
+            start=(x, y), end=(x, y - doc_height),
+            stroke='#000000', stroke_width=1, stroke_opacity='0.67'
+        ))
+
+
+def draw_gridlines(dwg, x, y, length):
+    dwg.add(dwg.line(
+        start=(x, y), end=(x + length, y), stroke='#111111',
+        stroke_width=1, stroke_opacity='0.3'
+    ))
+
+
 def draw_docs(areas, dwg, start_date, timeline_length):
     area_count = 0
     y_offset = 0 + y_buffer
     doc_line_x = x_buffer + track_title_length + area_title_length
 
-    for area in areas.values():
+    area_keys = list(areas.keys())
+    area_keys.sort()
+
+    for area_key in area_keys:
+        area = areas[area_key]
+        group_keys = list(area.groups.keys())
+        group_keys.sort()
+
         colour = drawing.colours[area_count]
 
-        for group in area.groups.values():
+        for group_key in group_keys:
+            group = area.groups[group_key]
             doc_num = 1
+
+            group.documents.sort(key=lambda x: x.document.title)
 
             for doc in group.documents:
                 doc_x = (doc.document.creation_date - start_date).days\
@@ -451,35 +517,9 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                     width = 4
                     stroke_style = '10,5'
 
-                # Draw the bar representing the doc
-                doc_rect = dwg.rect(
-                    insert=(doc_x, doc_y - doc_height), size=(doc_length, doc_height),fill=colour,
-                    stroke='#000000', stroke_width=width, stroke_dasharray=stroke_style
-                )
-                doc_rect.update({'onmousemove' : 'ShowTooltip(evt, "' + tooltip_text + '")',
-                                 'onmouseout':'HideTooltip()'})
-                dwg.add(doc_rect)
-
-                # Draw vertical lines in bars to indicate new revisions of the document
-                for revision in doc.document.revision_dates:
-                    revision_x = (revision - start_date).days + x_buffer + track_title_length + area_title_length
-
-                    dwg.add(dwg.line(
-                        start=(revision_x, doc_y), end=(revision_x, doc_y - doc_height),
-                        stroke='#000000', stroke_width=1, stroke_opacity='0.67'
-                    ))
-
-                # Draw the name of the doc
-                dwg.add(dwg.text(
-                    text=name_text, insert=(doc_x, doc_y - doc_height/2), textLength=str(doc_length),
-                    lengthAdjust='spacingAndGlyphs'
-                ))
-
-                # Draw horizontal gridline
-                dwg.add(dwg.line(
-                    start=(doc_line_x, doc_y), end=(doc_line_x + timeline_length, doc_y), stroke='#111111',
-                    stroke_width=1, stroke_opacity='0.3'
-                ))
+                draw_doc(dwg, doc_x, doc_y, doc_length, width, stroke_style, colour, tooltip_text, name_text)
+                draw_gridlines(dwg, doc_line_x, doc_y, timeline_length)
+                draw_revisions(dwg, start_date, doc.document.revision_dates, doc_y)
 
                 doc_num = doc_num + 1
             y_offset = y_offset + group.height
@@ -591,7 +631,8 @@ def filter_references(references):
     filter_lambda = (lambda x: x.type == 'refold' or
                                x.type == 'refinfo' or
                                x.type == 'refnorm' or
-                               x.type == 'refunk'
+                               x.type == 'refunk' or
+                               x.type == 'obs'
                      )
     return list(filter(filter_lambda, references))
 
@@ -624,6 +665,36 @@ def get_earliest_date(doc):
     return min(doc.expiry_date, doc.publish_date, doc.creation_date)
 
 
+def add_doc_to_drawing_areas(areas, doc, type):
+    group = doc.group
+    area = doc.area
+    new_document = drawing.DrawingDoc(doc, type)
+
+    if area.name not in areas.keys():
+        new_area = drawing.DrawingArea(area.name)
+        new_group = drawing.DrawingGroup(group.name)
+        new_group.add_document(new_document)
+        new_area.add_group(new_group)
+        areas[area.name] = new_area
+
+    else:
+        if group.name not in areas[area.name].groups.keys():
+            new_group = drawing.DrawingGroup(group.name)
+            new_group.add_document(new_document)
+            areas[area.name].add_group(new_group)
+        else:
+            areas[area.name].groups[group.name].add_document(new_document)
+
+    return areas
+
+
+def adjust_heights(areas):
+    for area in areas.values():
+        for group in area.groups.values():
+            group.adjust_height()
+        area.adjust_height()
+
+
 def generate_timeline(rfc_num):
 
     root = get_doc(rfc_num)
@@ -644,43 +715,11 @@ def generate_timeline(rfc_num):
     areas = {}
 
     for reference in references:
-        new_document = drawing.DrawingDoc(reference.target, reference.type)
-        if reference.target.area.name not in areas.keys():
-            new_area = drawing.DrawingArea(reference.target.area.name)
-            new_group = drawing.DrawingGroup(reference.target.group.name)
-            new_group.add_document(new_document)
-            new_area.add_group(new_group)
-            areas[reference.target.area.name] = new_area
+        areas = add_doc_to_drawing_areas(areas, reference.target, reference.type)
 
-        else:
-            if reference.target.group.name not in areas[reference.target.area.name].groups.keys():
-                new_group = drawing.DrawingGroup(reference.target.group.name)
-                new_group.add_document(new_document)
-                areas[reference.target.area.name].add_group(new_group)
-            else:
-                areas[reference.target.area.name].groups[reference.target.group.name].add_document(new_document)
+    add_doc_to_drawing_areas(areas, root, 'root')
 
-    root = references[0].source
-    new_document = drawing.DrawingDoc(root, 'root')
-    if root.area.name not in areas.keys():
-        new_area = drawing.DrawingArea(root.area.name)
-        new_group = drawing.DrawingGroup(root.group.name)
-        new_group.add_document(new_document)
-        new_area.add_group(new_group)
-        areas[root.area.name] = new_area
-
-    else:
-        if root.group.name not in areas[root.area.name].groups.keys():
-            new_group = drawing.DrawingGroup(root.group.name)
-            new_group.add_document(new_document)
-            areas[root.area.name].add_group(new_group)
-        else:
-            areas[root.area.name].groups[root.group.name].add_document(new_document)
-
-    for area in areas.values():
-        for group in area.groups.values():
-            group.adjust_height()
-        area.adjust_height()
+    adjust_heights(areas)
 
     draw_timeline(areas, time_delta, start_date, end_date)
 
@@ -688,7 +727,7 @@ def generate_timeline(rfc_num):
 def initialise_caches():
     if -1 not in group_cache.keys():
         no_area = docs.Group(-1)
-        no_area.set_name("No Area")
+        no_area.set_name("N/A")
         group_cache[-1] = no_area
 
 
