@@ -27,7 +27,6 @@ reference_cache = {}
 # A dictionary of groups indexed on their id (such as group_cache[1027])
 group_cache = {}
 
-
 def convert_string_to_datetime(string):
     date = string.split('T')[0]
     date_split = date.split('-')
@@ -109,6 +108,23 @@ def get_relationships(doc_name):
         next = meta_data['next']
 
         relationships = relationships + resp.json().get('objects')
+
+    return relationships
+
+
+def get_target_relationships(doc_name):
+    relationships = list()
+    next = '/api/v1/doc/relateddocument/?limit=50&target=' + doc_name
+
+    while next is not None:
+        resp = rq.get(base + next)
+        json = resp.json()
+        meta_data = json['meta']
+        next = meta_data['next']
+
+        relationships = relationships + resp.json().get('objects')
+
+    # print(relationships)
 
     return relationships
 
@@ -245,6 +261,13 @@ def build_reference(reference, target_doc_name):
     return reference
 
 
+def build_future_reference(reference, source_doc_name):
+    get_doc(source_doc_name)
+    reference.set_source(doc_cache[source_doc_name])
+
+    return reference
+
+
 def get_source_references(root):
     executor = ThreadPoolExecutor(max_workers=500)
     futures = list()
@@ -267,6 +290,35 @@ def get_source_references(root):
 
     for future in as_completed(futures):
         references.append(future.result())
+
+    return references
+
+
+def get_future_references(root):
+    executor = ThreadPoolExecutor(max_workers=500)
+    futures = list()
+    references = list()
+
+    relationships = get_target_relationships('rfc' + root.rfc_num)
+
+    for relationship in relationships:
+        new_reference = docs.Reference()
+        new_reference.set_target(root)
+
+        type_split = relationship.get('relationship').split('/')
+        type = type_split[-2]
+        new_reference.set_type(type)
+
+        source_split = relationship.get('source').split('/')
+        source_doc_name = source_split[-2].upper()
+
+        futures.append(executor.submit(build_future_reference, new_reference, source_doc_name))
+
+    for future in as_completed(futures):
+        references.append(future.result())
+
+    for ref in references:
+        print(ref)
 
     return references
 
@@ -700,6 +752,18 @@ def generate_timeline(rfc_num):
     root = get_doc(rfc_num)
 
     related_docs = get_source_references(root)
+    future_docs = get_future_references(root)
+
+    print('FUTURE DOCS:')
+    for ref in future_docs:
+        print(ref)
+        print(ref.source.title)
+        print(ref.source.id)
+        print(ref.source.rfc_num)
+        print(ref.target.rfc_num)
+        print(ref.type)
+
+
     references = remove_duplicate_references(filter_references(related_docs))
 
     desc_references = list(references)
