@@ -14,15 +14,18 @@ function init(evt)
     publish = svgDocument.getElementById('publish');
     console.log("INIT RUN");
 }
+
 function ShowTooltip(evt, mouseovertext)
 {
+    console.log('show tooltip called!')
     var splitText = mouseovertext.split("   ");
     var maxLength = 0;
     console.log("split: " + splitText);
-    for (i = 0; i < splitText.length; i++)
+    for (i = 0; i < splitText.length; i++){
         if (splitText[i].length > maxLength) {
-            maxLength = splitText.length;
+            maxLength = splitText[i].length;
         }
+    }
     console.log("max length: ", maxLength);
     title.setAttributeNS(null,"x",evt.clientX+11);
     title.setAttributeNS(null,"y",evt.clientY+25);
@@ -53,8 +56,9 @@ function ShowTooltip(evt, mouseovertext)
     creation.firstChild.data = splitText[5];
     publish.firstChild.data = splitText[6];
     tooltip_bg.setAttributeNS(null,"x",evt.clientX+8);
-    tooltip_bg.setAttributeNS(null,"y",evt.clientY+150);
-    tooltip_bg.setAttributeNS(null,"width", maxLength);
+    tooltip_bg.setAttributeNS(null,"y",evt.clientY+10);
+    tooltip_bg.setAttributeNS(null,"width", maxLength * 8);
+    tooltip_bg.setAttributeNS(null,"height", 145);
     tooltip_bg.setAttributeNS(null,"visibility","visible");
 }
 function HideTooltip()

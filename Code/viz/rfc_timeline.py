@@ -85,7 +85,7 @@ def update_doc_groups(doc):
 
     doc.set_area_url(doc.group.parent_url)
 
-    print(doc.group.name, doc.group_url, doc.area_url)
+    # print(doc.group.name, doc.group_url, doc.area_url)
 
     # Not all groups are part of areas (such as
     if doc.area_url is not None:
@@ -211,6 +211,8 @@ def get_tooltip_text(doc):
         text = text + 'Publish: ' + doc.publish_date.strftime('%m/%d/%Y')
 
     text = text.replace('\"', '\'')
+    text = text.replace('\n', '')
+    text = text.replace('\r', '')
 
     return text
 
@@ -317,9 +319,6 @@ def get_future_references(root):
     for future in as_completed(futures):
         references.append(future.result())
 
-    for ref in references:
-        print(ref)
-
     return references
 
 
@@ -399,8 +398,6 @@ def draw_areas(areas, dwg):
     area_keys = list(areas.keys())
     area_keys.sort()
 
-    print(area_keys)
-
     for key in area_keys:
         area = areas[key]
         track_colour = drawing.track_colours[area_count]
@@ -437,13 +434,11 @@ def draw_tracks(areas, dwg, length):
     area_keys = list(areas.keys())
     area_keys.sort()
 
-    print(area_keys)
 
     for area_key in area_keys:
         area = areas[area_key]
         group_keys = list(area.groups.keys())
         group_keys.sort()
-        print(group_keys)
 
         track_colour = drawing.track_colours[area_count]
 
@@ -457,7 +452,7 @@ def draw_tracks(areas, dwg, length):
 
 def draw_tooltip(dwg):
     dwg.add(dwg.rect(
-        id='tooltip_bg', visibility='hidden', rx='4', ry='4'
+        id='tooltip_bg', visibility='hidden', rx='4', ry='4', fill='#ffffff', fill_opacity='0.8'
     ))
 
     dwg.add(dwg.text(
@@ -536,7 +531,7 @@ def draw_docs(areas, dwg, start_date, timeline_length):
         group_keys = list(area.groups.keys())
         group_keys.sort()
 
-        colour = drawing.colours[area_count]
+        # colour = drawing.colours[area_count]
 
         for group_key in group_keys:
             group = area.groups[group_key]
@@ -551,20 +546,36 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                 name_text = doc.document.title
                 tooltip_text = get_tooltip_text(doc.document)
 
-                if (doc.document.publish_date - doc.document.creation_date).days < 150:
+                if doc.document.publish_date is None:
+                    if doc.document.revision_dates is []:
+                        doc_length = 150
+                    else:
+                        doc_length = (doc.document.creation_date - max(doc.document.revision_dates)).days
+                elif (doc.document.publish_date - doc.document.creation_date).days < 150:
                     doc_length = 150
                 else:
                     doc_length = (doc.document.publish_date - doc.document.creation_date).days
+
+                if doc.document.rfc_num is None:
+                    colour = track_colours[area_count]
+                else:
+                    colour = colours[area_count]
 
                 if doc.reference_type == 'refinfo':
                     width = 1
                     stroke_style = '10,0'
                 elif doc.reference_type == 'refnorm':
                     width = 4
-                    stroke_style = '10,5'
-                elif doc.reference_type == 'root':
-                    width = 10
                     stroke_style = '10,0'
+                elif doc.reference_type == 'root':
+                    width = 1
+                    stroke_style = '10,0'
+
+                    if doc.document.obsolete:
+                        colour = 'grey'
+                    else:
+                        colour = 'white'
+
                 else:
                     width = 4
                     stroke_style = '10,5'
@@ -605,9 +616,10 @@ def draw_scale(dwg, start_date, end_date, areas_height):
     ))
 
 
-def draw_axis_gridlines(dwg, start_date, end_date, areas_height):
+def draw_axis_gridlines(dwg, start_date, end_date, future_date, areas_height):
     left_x = x_buffer + track_title_length + area_title_length
     right_x = left_x + (end_date - start_date).days
+    future_x = left_x + (future_date - start_date).days
     track_bottom_y = areas_height + y_buffer
     timeline_y = areas_height + y_buffer + scale_y_offset
 
@@ -634,6 +646,11 @@ def draw_axis_gridlines(dwg, start_date, end_date, areas_height):
         next_year = datetime.datetime(year=next_year.year + 1, month=1, day=1)
         gridline_x = gridline_x + (next_year - last_year).days
 
+    dwg.add(dwg.line(
+        start=(future_x, track_bottom_y), end=(future_x, y_buffer), stroke='#000000',
+        stroke_width=2, stroke_dasharray='8,2'
+    ))
+
 
 def get_file(filename):
     file = open(filename, 'r')
@@ -643,7 +660,7 @@ def get_file(filename):
     return script_string
 
 
-def draw_timeline(areas, time_delta, start_date, end_date):
+def draw_timeline(areas, time_delta, start_date, end_date, future_date):
     img_length = time_delta.days + (2 * x_buffer) + track_title_length + area_title_length
     total_areas_height = 0
 
@@ -665,7 +682,7 @@ def draw_timeline(areas, time_delta, start_date, end_date):
     draw_areas(areas, dwg)
     draw_tracks(areas, dwg, time_delta.days)
     draw_scale(dwg, start_date, end_date, total_areas_height)
-    draw_axis_gridlines(dwg, start_date, end_date, total_areas_height)
+    draw_axis_gridlines(dwg, start_date, end_date, future_date, total_areas_height)
     draw_docs(areas, dwg, start_date, time_delta.days)
     draw_tooltip(dwg)
 
@@ -754,38 +771,67 @@ def generate_timeline(rfc_num):
     related_docs = get_source_references(root)
     future_docs = get_future_references(root)
 
-    print('FUTURE DOCS:')
-    for ref in future_docs:
-        print(ref)
-        print(ref.source.title)
-        print(ref.source.id)
-        print(ref.source.rfc_num)
-        print(ref.target.rfc_num)
-        print(ref.type)
-
-
     references = remove_duplicate_references(filter_references(related_docs))
+    future_references = remove_duplicate_references(filter_references(future_docs))
 
-    desc_references = list(references)
-    desc_references.sort(key=lambda x: get_latest_date(x.target), reverse=True)
-    asc_references = list(references)
-    asc_references.sort(key=lambda x: get_earliest_date(x.target), reverse=False)
+    past_dates = list()
+    future_dates = list()
 
-    end_date = max(get_latest_date(desc_references[0].source), get_latest_date(desc_references[0].target))
-    start_date = min(get_earliest_date(asc_references[0].source), get_earliest_date(asc_references[0].target))
+    for ref in references:
+        if ref.target.creation_date is not None:
+            past_dates.append(ref.target.creation_date)
+
+        if ref.target.publish_date is not None:
+            future_dates.append(ref.target.publish_date)
+    past_dates.sort()
+
+    for ref in future_references:
+
+        if ref.type == 'obs':
+            root.set_obsolete(True)
+
+        if ref.source.creation_date is not None:
+            future_dates.append(ref.source.creation_date)
+
+        if ref.source.publish_date is not None:
+            future_dates.append(ref.source.publish_date)
+        else:
+            if ref.source.revision_dates is []:
+                print('padding')
+                date_padding = datetime.timedelta(days=150)
+                future_dates.append(ref.source.creation_date + date_padding)
+            else:
+                print('revision:', max(ref.source.revision_dates))
+                future_dates.append(max(ref.source.revision_dates))
+                ref.source.publish_date = max(ref.source.revision_dates)
+
+    all_dates = past_dates + future_dates
+    all_dates.append(future_references[0].target.publish_date)
+
+    start_date = min(all_dates)
+    end_date = max(all_dates)
+
+    future_date = future_references[0].target.publish_date
 
     time_delta = end_date - start_date
 
     areas = {}
 
     for reference in references:
+        print(reference.target.title)
         areas = add_doc_to_drawing_areas(areas, reference.target, reference.type)
+
+    print('================')
+
+    for reference in future_references:
+        print(reference.source.title, reference.source.creation_date, reference.source.publish_date)
+        areas = add_doc_to_drawing_areas(areas, reference.source, reference.type)
 
     add_doc_to_drawing_areas(areas, root, 'root')
 
     adjust_heights(areas)
 
-    draw_timeline(areas, time_delta, start_date, end_date)
+    draw_timeline(areas, time_delta, start_date, end_date, future_date)
 
 
 def initialise_caches():

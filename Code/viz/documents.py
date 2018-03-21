@@ -52,6 +52,7 @@ class Document:
         self.expiry_date = None
         self.publish_date = None
         self.revision_dates = []
+        self.obsolete = False
 
     def set_draft_name(self, name):
         self.draft_name = name
@@ -91,3 +92,6 @@ class Document:
 
     def add_revision(self, revision):
         self.revision_dates.append(revision)
+
+    def set_obsolete(self, obs):
+        self.obsolete = obs
