@@ -27,6 +27,8 @@ reference_cache = {}
 # A dictionary of groups indexed on their id (such as group_cache[1027])
 group_cache = {}
 
+cached_date = datetime.datetime(year=1000, month=1, day=1)
+
 def convert_string_to_datetime(string):
     date = string.split('T')[0]
     date_split = date.split('-')
@@ -198,14 +200,21 @@ def get_events(name):
 
 
 def get_tooltip_text(doc):
-    text = 'Title: ' + doc.title + '   ' + \
-           'Draft name: ' + doc.draft_name + '   ' + \
-           'Abstract: ' + doc.abstract + '   ' + \
-           'Group: ' + doc.group.name + '   ' + \
-           'Area: ' + doc.area.name + '   ' + \
-           'Creation: ' + doc.creation_date.strftime('%m/%d/%Y') + '   '
+    text = 'Title: ' + doc.title + '***'
 
-    if doc.publish_date is None:
+    if doc.rfc_num is None:
+        text = text + 'RFC: None' + '***'
+    else:
+        text = text + 'RFC: ' + doc.rfc_num + '***'
+
+    text = text + \
+           'Draft name: ' + doc.draft_name + '***' + \
+           'Abstract: ' + doc.abstract + '***' + \
+           'Group: ' + doc.group.name + '***' + \
+           'Area: ' + doc.area.name + '***' + \
+           'Creation: ' + doc.creation_date.strftime('%m/%d/%Y') + '***'
+
+    if doc.publish_date is None or doc.rfc_num is None:
         text = text + 'Publish: ' + 'None'
     else:
         text = text + 'Publish: ' + doc.publish_date.strftime('%m/%d/%Y')
@@ -302,6 +311,7 @@ def get_future_references(root):
     references = list()
 
     relationships = get_target_relationships('rfc' + root.rfc_num)
+    # relationships = relationships + get_target_relationships(root.draft_name)
 
     for relationship in relationships:
         new_reference = docs.Reference()
@@ -323,39 +333,51 @@ def get_future_references(root):
 
 
 def unpickle_caches():
+    global cached_date
     global doc_cache
     global reference_cache
     global group_cache
 
     try:
+        cached_date_file = open('date.pickle', 'rb')
+        cached_date = pickle.load(cached_date_file)
+        cached_date_file.close()
+        print('Loaded Date of Cache')
 
-        doc_cache_file = open('docs.pickle', 'rb')
-        doc_cache = pickle.load(doc_cache_file)
-        doc_cache_file.close()
-        print('Loaded document cache')
+        if datetime.datetime.now() - cached_date < datetime.timedelta(days=24):
+            try:
+                doc_cache_file = open('docs.pickle', 'rb')
+                doc_cache = pickle.load(doc_cache_file)
+                doc_cache_file.close()
+                print('Loaded document cache')
+
+            except FileNotFoundError:
+                print('No document cache found!')
+
+            try:
+
+                reference_cache_file = open('refs.pickle', 'rb')
+                reference_cache = pickle.load(reference_cache_file)
+                reference_cache_file.close()
+                print('Loaded reference cache')
+
+            except FileNotFoundError:
+                print('No reference cache found!')
+
+            try:
+
+                group_cache_file = open('groups.pickle', 'rb')
+                group_cache = pickle.load(group_cache_file)
+                group_cache_file.close()
+                print('Loaded group cache')
+
+            except FileNotFoundError:
+                print('No group cache found!')
+        else:
+            print('Caches out of date.')
 
     except FileNotFoundError:
-        print('No document cache found!')
-
-    try:
-
-        reference_cache_file = open('refs.pickle', 'rb')
-        reference_cache = pickle.load(reference_cache_file)
-        reference_cache_file.close()
-        print('Loaded reference cache')
-
-    except FileNotFoundError:
-        print('No reference cache found!')
-
-    try:
-
-        group_cache_file = open('groups.pickle', 'rb')
-        group_cache = pickle.load(group_cache_file)
-        group_cache_file.close()
-        print('Loaded group cache')
-
-    except FileNotFoundError:
-        print('No group cache found!')
+        print('No date cache found!')
 
 
 def pickle_caches():
@@ -377,6 +399,11 @@ def pickle_caches():
     group_cache_file.close()
     print('Group cache written to disk!')
 
+    cached_date_file = open('date.pickle', 'wb')
+    pickle.dump(cached_date, cached_date_file, protocol=-1)
+    cached_date_file.close()
+    print('Cache date written to disk!')
+
 
 def draw_area(dwg, y_offset, height, name, track_colour):
     y_title = y_offset + (height / 2)
@@ -385,11 +412,42 @@ def draw_area(dwg, y_offset, height, name, track_colour):
         insert=(x_buffer, y_offset), size=(area_title_length, height),
         fill=track_colour, stroke='#000000'))
 
-    dwg.add(dwg.text(
-        text=name, insert=(x_buffer + 10, y_offset + 10),
-        textLength=area_title_length, lengthAdjust='spacing',
-        writing_mode='tb'
-    ))
+    if len(name) * 10 > area_title_length:
+        #
+        # first_half_name = name[:int(area_title_length/10) -1]
+        #
+        # print(first_half_name[-1])
+        #
+        # if first_half_name[-1] is not ' ':
+        #     first_half_name =  first_half_name + '-'
+        #
+        # second_half_name = name[int(area_title_length/10)-1:]
+        #
+        # dwg.add(dwg.text(
+        #     text=first_half_name, insert=(x_buffer + 5, y_offset + 15),
+        #     textLength=area_title_length - 10
+        # ))
+        #
+        # dwg.add(dwg.text(
+        #     text=second_half_name, insert=(x_buffer + 5, y_offset + 30),
+        #     textLength=len(second_half_name) * 10 - 10
+        # ))
+        name_split = name.split(' ')
+        count = 0
+
+        for word in name_split:
+            dwg.add(dwg.text(
+                text=word, insert=(x_buffer + 5, y_offset + 15 + (15 * count)),
+                textLength=len(word)  * 8
+            ))
+            count = count + 1
+
+
+    else:
+        dwg.add(dwg.text(
+            text=name, insert=(x_buffer + 5, y_offset + 15),
+            textLength=area_title_length - 10
+        ))
 
 def draw_areas(areas, dwg):
     y_offset = 0 + y_buffer
@@ -402,7 +460,7 @@ def draw_areas(areas, dwg):
         area = areas[key]
         track_colour = drawing.track_colours[area_count]
 
-        draw_area(dwg,y_offset, area.height, area.name, track_colour)
+        draw_area(dwg, y_offset, area.height, area.name, track_colour)
 
         area_count = area_count + 1
         y_offset = y_offset + area.height
@@ -415,9 +473,19 @@ def draw_track(dwg, group, y_offset, track_length, track_colour):
     dwg.add(dwg.rect(
         insert=(x, y_offset), size=(track_length, group.height), fill=track_colour, stroke='#000000'))
 
-    dwg.add(dwg.text(
-        text=group.name, insert=(x + 10, y_title),
-        textLength=track_height, lengthAdjust='spacing'))
+    # dwg.add(dwg.text(
+    #     text=group.name, insert=(x + 10, y_title),
+    #     textLength=(len(group.name)) * 10, lengthAdjust='spacing'))
+
+    name_split = group.name.split(' ')
+    count = 0
+
+    for word in name_split:
+        dwg.add(dwg.text(
+            text=word, insert=(x + 5, y_title + (15 * count)),
+            textLength=len(word)  * 8
+        ))
+        count = count + 1
 
     dwg.add(dwg.line(
         start=(x + track_title_length, y_offset),
@@ -460,6 +528,10 @@ def draw_tooltip(dwg):
     ))
 
     dwg.add(dwg.text(
+        id='rfc', text='RFC:', visibility='hidden'
+    ))
+
+    dwg.add(dwg.text(
         id='draft', text='Draft:', visibility='hidden'
     ))
 
@@ -484,11 +556,11 @@ def draw_tooltip(dwg):
     ))
 
 
-def draw_doc(dwg, x, y, length, stroke_width, stroke_style, colour, tooltip_text, name):
+def draw_doc(dwg, x, y, length, stroke_width, stroke_style, line_colour, colour, tooltip_text, name):
     # Draw the bar representing the doc
     doc_rect = dwg.rect(
         insert=(x, y - doc_height), size=(length, doc_height),fill=colour,
-        stroke='#000000', stroke_width=stroke_width, stroke_dasharray=stroke_style
+        stroke=line_colour, stroke_width=stroke_width, stroke_dasharray=stroke_style
     )
     doc_rect.update({'onmousemove' : 'ShowTooltip(evt, "' + tooltip_text + '")',
                      'onmouseout':'HideTooltip()'})
@@ -564,12 +636,15 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                 if doc.reference_type == 'refinfo':
                     width = 1
                     stroke_style = '10,0'
+                    line_colour = '#000000'
                 elif doc.reference_type == 'refnorm':
                     width = 4
                     stroke_style = '10,0'
+                    line_colour = '#000000'
                 elif doc.reference_type == 'root':
                     width = 1
                     stroke_style = '10,0'
+                    line_colour = '#000000'
 
                     if doc.document.obsolete:
                         colour = 'grey'
@@ -579,8 +654,11 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                 else:
                     width = 4
                     stroke_style = '10,5'
+                    line_colour = '#999999'
 
-                draw_doc(dwg, doc_x, doc_y, doc_length, width, stroke_style, colour, tooltip_text, name_text)
+                draw_doc(dwg, doc_x, doc_y, doc_length, width,
+                         stroke_style, line_colour, colour,
+                         tooltip_text, name_text)
                 draw_gridlines(dwg, doc_line_x, doc_y, timeline_length)
                 draw_revisions(dwg, start_date, doc.document.revision_dates, doc_y)
 
@@ -646,6 +724,11 @@ def draw_axis_gridlines(dwg, start_date, end_date, future_date, areas_height):
         next_year = datetime.datetime(year=next_year.year + 1, month=1, day=1)
         gridline_x = gridline_x + (next_year - last_year).days
 
+
+def draw_future_line(dwg, start_date, future_date, areas_height):
+    track_bottom_y = areas_height + y_buffer
+    future_x = x_buffer + track_title_length + area_title_length + (future_date - start_date).days
+
     dwg.add(dwg.line(
         start=(future_x, track_bottom_y), end=(future_x, y_buffer), stroke='#000000',
         stroke_width=2, stroke_dasharray='8,2'
@@ -684,6 +767,7 @@ def draw_timeline(areas, time_delta, start_date, end_date, future_date):
     draw_scale(dwg, start_date, end_date, total_areas_height)
     draw_axis_gridlines(dwg, start_date, end_date, future_date, total_areas_height)
     draw_docs(areas, dwg, start_date, time_delta.days)
+    draw_future_line(dwg, start_date, future_date, total_areas_height)
     draw_tooltip(dwg)
 
     if not os.path.exists('output'):
@@ -800,18 +884,19 @@ def generate_timeline(rfc_num):
                 print('padding')
                 date_padding = datetime.timedelta(days=150)
                 future_dates.append(ref.source.creation_date + date_padding)
+                ref.source.publish_date = ref.source.creation_date + date_padding
             else:
                 print('revision:', max(ref.source.revision_dates))
                 future_dates.append(max(ref.source.revision_dates))
                 ref.source.publish_date = max(ref.source.revision_dates)
 
     all_dates = past_dates + future_dates
-    all_dates.append(future_references[0].target.publish_date)
+    all_dates.append(references[0].source.publish_date)
 
     start_date = min(all_dates)
     end_date = max(all_dates)
 
-    future_date = future_references[0].target.publish_date
+    future_date = references[0].source.publish_date
 
     time_delta = end_date - start_date
 
