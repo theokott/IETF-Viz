@@ -1,3 +1,7 @@
 body {
-  background: lightyellow;
+  background: white;
+}
+
+.key {
+  padding-left: 10%;
 }

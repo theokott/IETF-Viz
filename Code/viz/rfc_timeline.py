@@ -344,7 +344,7 @@ def unpickle_caches():
         cached_date_file.close()
         print('Loaded Date of Cache')
 
-        if datetime.datetime.now() - cached_date < datetime.timedelta(days=24):
+        if datetime.datetime.now() - cached_date > datetime.timedelta(days=24):
             try:
                 doc_cache_file = open('docs.pickle', 'rb')
                 doc_cache = pickle.load(doc_cache_file)
@@ -556,7 +556,7 @@ def draw_tooltip(dwg):
     ))
 
 
-def draw_doc(dwg, x, y, length, stroke_width, stroke_style, line_colour, colour, tooltip_text, name):
+def draw_doc(dwg, x, y, length, stroke_width, stroke_style, line_colour, colour, tooltip_text, name, url):
     # Draw the bar representing the doc
     doc_rect = dwg.rect(
         insert=(x, y - doc_height), size=(length, doc_height),fill=colour,
@@ -564,7 +564,12 @@ def draw_doc(dwg, x, y, length, stroke_width, stroke_style, line_colour, colour,
     )
     doc_rect.update({'onmousemove' : 'ShowTooltip(evt, "' + tooltip_text + '")',
                      'onmouseout':'HideTooltip()'})
-    dwg.add(doc_rect)
+
+    doc_link = svgwrite.container.Hyperlink(href=url)
+
+    doc_link.add(doc_rect)
+
+    dwg.add(doc_link)
 
     # Draw the name of the doc
     dwg.add(dwg.text(
@@ -618,6 +623,11 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                 name_text = doc.document.title
                 tooltip_text = get_tooltip_text(doc.document)
 
+                if doc.document.rfc_num is not None:
+                    url = 'https://tools.ietf.org/html/' + doc.document.rfc_num
+                else:
+                    url = 'https://tools.ietf.org/html/' + doc.document.draft_name
+
                 if doc.document.publish_date is None:
                     if doc.document.revision_dates is []:
                         doc_length = 150
@@ -634,8 +644,8 @@ def draw_docs(areas, dwg, start_date, timeline_length):
                     colour = colours[area_count]
 
                 if doc.reference_type == 'refinfo':
-                    width = 1
-                    stroke_style = '10,0'
+                    width = 4
+                    stroke_style = '10,10'
                     line_colour = '#000000'
                 elif doc.reference_type == 'refnorm':
                     width = 4
@@ -658,7 +668,7 @@ def draw_docs(areas, dwg, start_date, timeline_length):
 
                 draw_doc(dwg, doc_x, doc_y, doc_length, width,
                          stroke_style, line_colour, colour,
-                         tooltip_text, name_text)
+                         tooltip_text, name_text, url)
                 draw_gridlines(dwg, doc_line_x, doc_y, timeline_length)
                 draw_revisions(dwg, start_date, doc.document.revision_dates, doc_y)
 
@@ -881,12 +891,12 @@ def generate_timeline(rfc_num):
             future_dates.append(ref.source.publish_date)
         else:
             if ref.source.revision_dates is []:
-                print('padding')
+                # print('padding')
                 date_padding = datetime.timedelta(days=150)
                 future_dates.append(ref.source.creation_date + date_padding)
                 ref.source.publish_date = ref.source.creation_date + date_padding
             else:
-                print('revision:', max(ref.source.revision_dates))
+                # print('revision:', max(ref.source.revision_dates))
                 future_dates.append(max(ref.source.revision_dates))
                 ref.source.publish_date = max(ref.source.revision_dates)
 
@@ -903,13 +913,13 @@ def generate_timeline(rfc_num):
     areas = {}
 
     for reference in references:
-        print(reference.target.title)
+        # print(reference.target.title)
         areas = add_doc_to_drawing_areas(areas, reference.target, reference.type)
 
-    print('================')
+    # print('================')
 
     for reference in future_references:
-        print(reference.source.title, reference.source.creation_date, reference.source.publish_date)
+        # print(reference.source.title, reference.source.creation_date, reference.source.publish_date)
         areas = add_doc_to_drawing_areas(areas, reference.source, reference.type)
 
     add_doc_to_drawing_areas(areas, root, 'root')
@@ -928,11 +938,12 @@ def initialise_caches():
 
 def main():
     initialise_caches()
-    rfc_num = 'rfc' + input('Enter the requested RFC number: ')
+    rfc_num = 'RFC' + input('Enter the requested RFC number: ')
     root_doc = get_doc(rfc_num)
     doc_cache[root_doc.id] = root_doc
 
     generate_timeline(rfc_num)
+    print('Timeline for', rfc_num, 'generated')
 
 
 unpickle_caches()
